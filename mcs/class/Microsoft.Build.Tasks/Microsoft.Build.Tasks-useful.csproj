@@ -159,6 +159,9 @@
     <Compile Include="Mono.XBuild.Tasks.GenerateResourceInternal\PoResourceWriter.cs" />
     <Compile Include="Mono.XBuild.Tasks.GenerateResourceInternal\TxtResourceReader.cs" />
     <Compile Include="Mono.XBuild.Tasks.GenerateResourceInternal\TxtResourceWriter.cs" />
+    <Compile Include="..\..\tools\xbuild\XBuildConsts.cs">
+      <Link>XBuildConsts.cs</Link>
+    </Compile>
   </ItemGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
