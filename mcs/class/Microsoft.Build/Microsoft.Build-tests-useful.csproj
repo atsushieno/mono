@@ -84,6 +84,10 @@
       <Project>{2BAFB878-D329-46A5-93AF-5A4ECD403A13}</Project>
       <Name>Microsoft.Build.Framework-useful</Name>
     </ProjectReference>
+    <ProjectReference Include="..\Microsoft.Build.Utilities\Microsoft.Build.Utilities-useful.csproj">
+      <Project>{5CD66EA1-51EB-48EE-8C1C-DDFD23E22C38}</Project>
+      <Name>Microsoft.Build.Utilities-useful</Name>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Properties\" />
