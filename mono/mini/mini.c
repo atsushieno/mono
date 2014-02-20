@@ -683,6 +683,19 @@ mono_tramp_info_register (MonoTrampInfo *info)
 	mono_tramp_info_free (info);
 }
 
+static void
+mono_tramp_info_cleanup (void)
+{
+	GSList *l;
+
+	for (l = tramp_infos; l; l = l->next) {
+		MonoTrampInfo *info = l->data;
+
+		mono_tramp_info_free (info);
+	}
+	g_slist_free (tramp_infos);
+}
+
 G_GNUC_UNUSED static void
 break_count (void)
 {
@@ -4499,12 +4512,24 @@ create_jit_info (MonoCompile *cfg, MonoMethod *method_to_compile)
 			MonoExceptionClause *ec = &header->clauses [i];
 			MonoJitExceptionInfo *ei = &jinfo->clauses [i];
 			MonoBasicBlock *tblock;
-			MonoInst *exvar;
+			MonoInst *exvar, *spvar;
 
 			ei->flags = ec->flags;
 
-			exvar = mono_find_exvar_for_offset (cfg, ec->handler_offset);
-			ei->exvar_offset = exvar ? exvar->inst_offset : 0;
+			/*
+			 * The spvars are needed by mono_arch_install_handler_block_guard ().
+			 */
+			if (ei->flags == MONO_EXCEPTION_CLAUSE_FINALLY) {
+				int region;
+
+				region = ((i + 1) << 8) | MONO_REGION_FINALLY | ec->flags;
+				spvar = mono_find_spvar_for_region (cfg, region);
+				g_assert (spvar);
+				ei->exvar_offset = spvar->inst_offset;
+			} else {
+				exvar = mono_find_exvar_for_offset (cfg, ec->handler_offset);
+				ei->exvar_offset = exvar ? exvar->inst_offset : 0;
+			}
 
 			if (ei->flags == MONO_EXCEPTION_CLAUSE_FILTER) {
 				tblock = cfg->cil_offset_to_bb [ec->data.filter_offset];
@@ -7692,6 +7717,8 @@ mini_cleanup (MonoDomain *domain)
 	g_free (emul_opcode_opcodes);
 	g_free (vtable_trampolines);
 
+	mono_tramp_info_cleanup ();
+
 	mono_arch_cleanup ();
 
 	mono_generic_sharing_cleanup ();
@@ -7879,7 +7906,7 @@ mono_arch_get_gsharedvt_trampoline (MonoTrampInfo **info, gboolean aot)
 
 #endif
 
-#if defined(MONO_ARCH_GSHAREDVT_SUPPORTED) && !defined(MONO_GSHARING)
+#if defined(MONO_ARCH_GSHAREDVT_SUPPORTED) && !defined(ENABLE_GSHAREDVT)
 
 gboolean
 mono_arch_gsharedvt_sig_supported (MonoMethodSignature *sig)

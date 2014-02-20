@@ -4113,7 +4113,10 @@ sgen_thread_register (SgenThreadInfo* info, void *addr)
 
 	binary_protocol_thread_register ((gpointer)mono_thread_info_get_tid (info));
 
+	/* On win32, stack_start_limit should be 0, since the stack can grow dynamically */
+#ifndef HOST_WIN32
 	mono_thread_info_get_stack_bounds (&staddr, &stsize);
+#endif
 	if (staddr) {
 		info->stack_start_limit = staddr;
 		info->stack_end = staddr + stsize;
@@ -4151,8 +4154,13 @@ sgen_thread_detach (SgenThreadInfo *p)
 static void
 sgen_thread_unregister (SgenThreadInfo *p)
 {
-	binary_protocol_thread_unregister ((gpointer)mono_thread_info_get_tid (p));
-	SGEN_LOG (3, "unregister thread %p (%p)", p, (gpointer)mono_thread_info_get_tid (p));
+	MonoNativeThreadId tid;
+
+	tid = mono_thread_info_get_tid (p);
+	binary_protocol_thread_unregister ((gpointer)tid);
+	SGEN_LOG (3, "unregister thread %p (%p)", p, (gpointer)tid);
+
+	mono_threads_add_joinable_thread ((gpointer)tid);
 
 	if (gc_callbacks.thread_detach_func) {
 		gc_callbacks.thread_detach_func (p->runtime_data);
@@ -4222,7 +4230,7 @@ mono_gc_pthread_detach (pthread_t thread)
 void
 mono_gc_pthread_exit (void *retval) 
 {
-	mono_thread_info_dettach ();
+	mono_thread_info_detach ();
 	pthread_exit (retval);
 }
 
@@ -4276,7 +4284,7 @@ mono_gc_wbarrier_arrayref_copy (gpointer dest_ptr, gpointer src_ptr, int count)
 	HEAVY_STAT (++stat_wbarrier_arrayref_copy);
 	/*This check can be done without taking a lock since dest_ptr array is pinned*/
 	if (ptr_in_nursery (dest_ptr) || count <= 0) {
-		mono_gc_memmove (dest_ptr, src_ptr, count * sizeof (gpointer));
+		mono_gc_memmove_aligned (dest_ptr, src_ptr, count * sizeof (gpointer));
 		return;
 	}
 
@@ -4455,7 +4463,7 @@ mono_gc_wbarrier_value_copy (gpointer dest, gpointer src, int count, MonoClass *
 	if (ptr_in_nursery (dest) || ptr_on_stack (dest) || !SGEN_CLASS_HAS_REFERENCES (klass)) {
 		size_t element_size = mono_class_value_size (klass, NULL);
 		size_t size = count * element_size;
-		mono_gc_memmove (dest, src, size);		
+		mono_gc_memmove_atomic (dest, src, size);		
 		return;
 	}
 
@@ -4488,7 +4496,7 @@ mono_gc_wbarrier_object_copy (MonoObject* obj, MonoObject *src)
 
 	if (ptr_in_nursery (obj) || ptr_on_stack (obj)) {
 		size = mono_object_class (obj)->instance_size;
-		mono_gc_memmove ((char*)obj + sizeof (MonoObject), (char*)src + sizeof (MonoObject),
+		mono_gc_memmove_aligned ((char*)obj + sizeof (MonoObject), (char*)src + sizeof (MonoObject),
 				size - sizeof (MonoObject));
 		return;	
 	}
@@ -4846,6 +4854,7 @@ mono_gc_base_init (void)
 	cb.thread_attach = sgen_thread_attach;
 	cb.mono_method_is_critical = (gpointer)is_critical_method;
 #ifndef HOST_WIN32
+	cb.thread_exit = mono_gc_pthread_exit;
 	cb.mono_gc_pthread_create = (gpointer)mono_gc_pthread_create;
 #endif
 

@@ -466,7 +466,7 @@ namespace Mono.CSharp {
 
 				return e;
 			} catch (Exception ex) {
-				if (loc.IsNull || ec.Module.Compiler.Settings.DebugFlags > 0 || ex is CompletionResult || ec.Report.IsDisabled || ex is FatalException ||
+				if (loc.IsNull || ec.Module.Compiler.Settings.BreakOnInternalError || ex is CompletionResult || ec.Report.IsDisabled || ex is FatalException ||
 					ec.Report.Printer is NullReportPrinter)
 					throw;
 
@@ -2313,11 +2313,11 @@ namespace Mono.CSharp {
 		protected override Expression DoResolve (ResolveContext rc)
 		{
 			expr = expr.Resolve (rc);
-			if (expr != null) {
-				type = expr.Type;
-				eclass = expr.eclass;
-			}
+			if (expr == null)
+				return null;
 
+			type = expr.Type;
+			eclass = expr.eclass;
 			return this;
 		}
 
@@ -2606,7 +2606,7 @@ namespace Mono.CSharp {
 				//
 				// dynamic namespace is ignored when dynamic is allowed (does not apply to types)
 				//
-				if (!(fne is Namespace))
+				if (!(fne is NamespaceExpression))
 					return fne;
 			}
 
@@ -2983,6 +2983,114 @@ namespace Mono.CSharp {
 			return type;
 		}
 	}
+
+	public class NamespaceExpression : FullNamedExpression
+	{
+		readonly Namespace ns;
+
+		public NamespaceExpression (Namespace ns, Location loc)
+		{
+			this.ns = ns;
+			this.Type = InternalType.Namespace;
+			this.eclass = ExprClass.Namespace;
+			this.loc = loc;
+		}
+
+		public Namespace Namespace {
+			get {
+				return ns;
+			}
+		}
+
+		protected override Expression DoResolve (ResolveContext rc)
+		{
+			throw new NotImplementedException ();
+		}
+
+		public override FullNamedExpression ResolveAsTypeOrNamespace (IMemberContext mc)
+		{
+			return this;
+		}
+
+		public void Error_NamespaceDoesNotExist (IMemberContext ctx, string name, int arity)
+		{
+			var retval = Namespace.LookupType (ctx, name, arity, LookupMode.IgnoreAccessibility, loc);
+			if (retval != null) {
+//				ctx.Module.Compiler.Report.SymbolRelatedToPreviousError (retval.MemberDefinition);
+				ErrorIsInaccesible (ctx, retval.GetSignatureForError (), loc);
+				return;
+			}
+
+			retval = Namespace.LookupType (ctx, name, -System.Math.Max (1, arity), LookupMode.Probing, loc);
+			if (retval != null) {
+				Error_TypeArgumentsCannotBeUsed (ctx, retval, loc);
+				return;
+			}
+
+			Namespace ns;
+			if (arity > 0 && Namespace.TryGetNamespace (name, out ns)) {
+				Error_TypeArgumentsCannotBeUsed (ctx, ExprClassName, ns.GetSignatureForError (), loc);
+				return;
+			}
+
+			string assembly = null;
+			string possible_name = Namespace.GetSignatureForError () + "." + name;
+
+			// Only assembly unique name should be added
+			switch (possible_name) {
+			case "System.Drawing":
+			case "System.Web.Services":
+			case "System.Web":
+			case "System.Data":
+			case "System.Configuration":
+			case "System.Data.Services":
+			case "System.DirectoryServices":
+			case "System.Json":
+			case "System.Net.Http":
+			case "System.Numerics":
+			case "System.Runtime.Caching":
+			case "System.ServiceModel":
+			case "System.Transactions":
+			case "System.Web.Routing":
+			case "System.Xml.Linq":
+			case "System.Xml":
+				assembly = possible_name;
+				break;
+
+			case "System.Linq":
+			case "System.Linq.Expressions":
+				assembly = "System.Core";
+				break;
+
+			case "System.Windows.Forms":
+			case "System.Windows.Forms.Layout":
+				assembly = "System.Windows.Forms";
+				break;
+			}
+
+			assembly = assembly == null ? "an" : "`" + assembly + "'";
+
+			if (Namespace is GlobalRootNamespace) {
+				ctx.Module.Compiler.Report.Error (400, loc,
+					"The type or namespace name `{0}' could not be found in the global namespace. Are you missing {1} assembly reference?",
+					name, assembly);
+			} else {
+				ctx.Module.Compiler.Report.Error (234, loc,
+					"The type or namespace name `{0}' does not exist in the namespace `{1}'. Are you missing {2} assembly reference?",
+					name, GetSignatureForError (), assembly);
+			}
+		}
+
+		public override string GetSignatureForError ()
+		{
+			return ns.GetSignatureForError ();
+		}
+
+		public FullNamedExpression LookupTypeOrNamespace (IMemberContext ctx, string name, int arity, LookupMode mode, Location loc)
+		{
+			return ns.LookupTypeOrNamespace (ctx, name, arity, mode, loc);
+		}
+    }
 
 	/// <summary>
 	///   This class denotes an expression which evaluates to a member
@@ -4621,7 +4729,8 @@ namespace Mono.CSharp {
 					if (g_args_count != type_arguments.Count)
 						return int.MaxValue - 20000 + System.Math.Abs (type_arguments.Count - g_args_count);
 
-					ms = ms.MakeGenericMethod (ec, type_arguments.Arguments);
+					if (type_arguments.Arguments != null)
+						ms = ms.MakeGenericMethod (ec, type_arguments.Arguments);
 				} else {
 					//
 					// Deploy custom error reporting for infered anonymous expression or lambda methods. When
@@ -5845,26 +5954,6 @@ namespace Mono.CSharp {
 				if (TypeSpec.IsReferenceType (InstanceExpression.Type))
 					InstanceExpression.FlowAnalysis (fc);
 			}
-		}
-
-
-		public void VerifyAssignedStructField (FlowAnalysisContext fc)
-		{
-			var fe = this;
-
-			do {
-				var var = fe.InstanceExpression as IVariableReference;
-				if (var != null) {
-					var vi = var.VariableInfo;
-
-					if (vi != null && !fc.IsStructFieldDefinitelyAssigned (vi, fe.Name) && !fe.type.IsStruct) {
-						fc.Report.Warning (1060, 1, fe.loc, "Use of possibly unassigned field `{0}'", fe.Name);
-					}
-				}
-
-				fe = fe.InstanceExpression as FieldExpr;
-
-			} while (fe != null);
 		}
 
 		Expression Error_AssignToReadonly (ResolveContext rc, Expression right_side)

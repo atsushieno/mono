@@ -678,6 +678,7 @@ arch_init (MonoAotCompile *acfg)
 #endif
 }
 
+#ifdef MONO_ARCH_AOT_SUPPORTED
 /*
  * arch_emit_direct_call:
  *
@@ -724,6 +725,7 @@ arch_emit_direct_call (MonoAotCompile *acfg, const char *target, gboolean extern
 	g_assert_not_reached ();
 #endif
 }
+#endif
 
 /*
  * PPC32 design:
@@ -840,6 +842,7 @@ arch_emit_got_access (MonoAotCompile *acfg, guint8 *code, int got_slot, int *cod
 
 #endif
 
+#ifdef MONO_ARCH_AOT_SUPPORTED
 /*
  * arch_emit_objc_selector_ref:
  *
@@ -868,6 +871,7 @@ arch_emit_objc_selector_ref (MonoAotCompile *acfg, guint8 *code, int index, int 
 	g_assert_not_reached ();
 #endif
 }
+#endif
 
 /*
  * arch_emit_plt_entry:
@@ -3815,6 +3819,9 @@ check_type_depth (MonoType *t, int depth)
 	return FALSE;
 }
 
+static void
+add_types_from_method_header (MonoAotCompile *acfg, MonoMethod *method);
+
 /*
  * add_generic_class:
  *
@@ -3875,9 +3882,11 @@ add_generic_class_with_depth (MonoAotCompile *acfg, MonoClass *klass, int depth,
 			continue;
 		}
 		
-		if (mono_method_is_generic_sharable_full (method, FALSE, FALSE, use_gsharedvt))
+		if (mono_method_is_generic_sharable_full (method, FALSE, FALSE, use_gsharedvt)) {
 			/* Already added */
+			add_types_from_method_header (acfg, method);
 			continue;
+		}
 
 		if (method->is_generic)
 			/* FIXME: */
@@ -4326,6 +4335,7 @@ is_direct_callable (MonoAotCompile *acfg, MonoMethod *method, MonoJumpInfo *patc
 	return FALSE;
 }
 
+#ifdef MONO_ARCH_AOT_SUPPORTED
 static const char *
 get_pinvoke_import (MonoAotCompile *acfg, MonoMethod *method)
 {
@@ -4355,6 +4365,7 @@ get_pinvoke_import (MonoAotCompile *acfg, MonoMethod *method)
 	
 	return import;
 }
+#endif
 
 static gint
 compare_lne (MonoDebugLineNumberEntry *a, MonoDebugLineNumberEntry *b)
@@ -4485,10 +4496,13 @@ emit_and_reloc_code (MonoAotCompile *acfg, MonoMethod *method, guint8 *code, gui
 	MonoJumpInfo *patch_info;
 	MonoMethodHeader *header;
 	MonoDebugSourceLocation **locs = NULL;
-	gboolean skip, direct_call, external_call;
+	gboolean skip;
+#ifdef MONO_ARCH_AOT_SUPPORTED
+	gboolean direct_call, external_call;
 	guint32 got_slot;
 	const char *direct_call_target = 0;
 	const char *direct_pinvoke;
+#endif
 
 	if (method) {
 		header = mono_method_get_header (method);
@@ -6968,7 +6982,8 @@ emit_llvm_file (MonoAotCompile *acfg)
 	 */
 	opts = g_strdup ("-instcombine -simplifycfg");
 	//opts = g_strdup ("-simplifycfg -domtree -domfrontier -scalarrepl -instcombine -simplifycfg -domtree -domfrontier -scalarrepl -simplify-libcalls -instcombine -simplifycfg -instcombine -simplifycfg -reassociate -domtree -loops -loop-simplify -domfrontier -loop-simplify -lcssa -loop-rotate -licm -lcssa -loop-unswitch -instcombine -scalar-evolution -loop-simplify -lcssa -iv-users -indvars -loop-deletion -loop-simplify -lcssa -loop-unroll -instcombine -memdep -gvn -memdep -memcpyopt -sccp -instcombine -domtree -memdep -dse -adce -simplifycfg -preverify -domtree -verify");
-	opts = g_strdup ("-targetlibinfo -no-aa -basicaa -notti -instcombine -simplifycfg -sroa -domtree -early-cse -lazy-value-info -correlated-propagation -simplifycfg -instcombine -simplifycfg -reassociate -domtree -loops -loop-simplify -lcssa -loop-rotate -licm -lcssa -loop-unswitch -instcombine -scalar-evolution -loop-simplify -lcssa -indvars -loop-idiom -loop-deletion -loop-unroll -memdep -gvn -memdep -memcpyopt -sccp -instcombine -lazy-value-info -correlated-propagation -domtree -memdep -dse -adce -simplifycfg -instcombine -strip-dead-prototypes -preverify -domtree -verify");
+	/* The dse pass is disabled because of #13734 and #17616 */
+	opts = g_strdup ("-targetlibinfo -no-aa -basicaa -notti -instcombine -simplifycfg -sroa -domtree -early-cse -lazy-value-info -correlated-propagation -simplifycfg -instcombine -simplifycfg -reassociate -domtree -loops -loop-simplify -lcssa -loop-rotate -licm -lcssa -loop-unswitch -instcombine -scalar-evolution -loop-simplify -lcssa -indvars -loop-idiom -loop-deletion -loop-unroll -memdep -gvn -memdep -memcpyopt -sccp -instcombine -lazy-value-info -correlated-propagation -domtree -memdep -adce -simplifycfg -instcombine -strip-dead-prototypes -preverify -domtree -verify");
 #if 1
 	command = g_strdup_printf ("%sopt -f %s -o \"%s.opt.bc\" \"%s.bc\"", acfg->aot_opts.llvm_path, opts, acfg->tmpbasename, acfg->tmpbasename);
 	printf ("Executing opt: %s\n", command);
@@ -8278,6 +8293,7 @@ collect_methods (MonoAotCompile *acfg)
 
 		if (!method) {
 			printf ("Failed to load method 0x%x from '%s'.\n", token, image->name);
+			printf ("Run with MONO_LOG_LEVEL=debug for more information.\n");
 			exit (1);
 		}
 			
@@ -8652,7 +8668,7 @@ mono_compile_assembly (MonoAssembly *ass, guint32 opts, const char *aot_options)
 	TV_DECLARE (atv);
 	TV_DECLARE (btv);
 
-#if !defined(MONO_ARCH_GSHAREDVT_SUPPORTED) || !defined(MONO_GSHARING)
+#if !defined(MONO_ARCH_GSHAREDVT_SUPPORTED) || !defined(ENABLE_GSHAREDVT)
 	if (opts & MONO_OPT_GSHAREDVT) {
 		fprintf (stderr, "-O=gsharedvt not supported on this platform.\n");
 		exit (1);

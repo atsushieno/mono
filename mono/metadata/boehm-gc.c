@@ -53,6 +53,8 @@ static mono_mutex_t mono_gc_lock;
 
 static void*
 boehm_thread_register (MonoThreadInfo* info, void *baseptr);
+static void
+boehm_thread_unregister (MonoThreadInfo *p);
 
 static void
 mono_gc_warning (char *msg, GC_word arg)
@@ -184,8 +186,10 @@ mono_gc_base_init (void)
 
 	memset (&cb, 0, sizeof (cb));
 	cb.thread_register = boehm_thread_register;
+	cb.thread_unregister = boehm_thread_unregister;
 	cb.mono_method_is_critical = (gpointer)mono_runtime_is_critical_method;
 #ifndef HOST_WIN32
+	cb.thread_exit = mono_gc_pthread_exit;
 	cb.mono_gc_pthread_create = (gpointer)mono_gc_pthread_create;
 #endif
 	
@@ -356,6 +360,16 @@ boehm_thread_register (MonoThreadInfo* info, void *baseptr)
 	return NULL;
 #endif
 #endif
+}
+
+static void
+boehm_thread_unregister (MonoThreadInfo *p)
+{
+	MonoNativeThreadId tid;
+
+	tid = mono_thread_info_get_tid (p);
+
+	mono_threads_add_joinable_thread ((gpointer)tid);
 }
 
 gboolean
@@ -622,7 +636,7 @@ mono_gc_wbarrier_set_arrayref (MonoArray *arr, gpointer slot_ptr, MonoObject* va
 void
 mono_gc_wbarrier_arrayref_copy (gpointer dest_ptr, gpointer src_ptr, int count)
 {
-	mono_gc_memmove (dest_ptr, src_ptr, count * sizeof (gpointer));
+	mono_gc_memmove_aligned (dest_ptr, src_ptr, count * sizeof (gpointer));
 }
 
 void
@@ -645,14 +659,14 @@ mono_gc_wbarrier_generic_nostore (gpointer ptr)
 void
 mono_gc_wbarrier_value_copy (gpointer dest, gpointer src, int count, MonoClass *klass)
 {
-	mono_gc_memmove (dest, src, count * mono_class_value_size (klass, NULL));
+	mono_gc_memmove_atomic (dest, src, count * mono_class_value_size (klass, NULL));
 }
 
 void
 mono_gc_wbarrier_object_copy (MonoObject* obj, MonoObject *src)
 {
 	/* do not copy the sync state */
-	mono_gc_memmove ((char*)obj + sizeof (MonoObject), (char*)src + sizeof (MonoObject),
+	mono_gc_memmove_aligned ((char*)obj + sizeof (MonoObject), (char*)src + sizeof (MonoObject),
 			mono_object_class (obj)->instance_size - sizeof (MonoObject));
 }
 

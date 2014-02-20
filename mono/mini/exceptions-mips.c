@@ -406,10 +406,7 @@ mono_arch_find_jit_info (MonoDomain *domain, MonoJitTlsData *jit_tls,
 
 		frame->type = FRAME_TYPE_MANAGED;
 
-		if (ji->from_aot)
-			unwind_info = mono_aot_get_unwind_info (ji, &unwind_info_len);
-		else
-			unwind_info = mono_get_cached_unwind_info (ji->used_regs, &unwind_info_len);
+		unwind_info = mono_jinfo_get_unwind_info (ji, &unwind_info_len);
 
 		for (i = 0; i < MONO_MAX_IREGS; ++i)
 			regs [i] = new_ctx->sc_regs [i];
@@ -501,7 +498,7 @@ mono_arch_monoctx_to_sigctx (MonoContext *mctx, void *sigctx)
 gpointer
 mono_arch_ip_from_context (void *sigctx)
 {
-	return (gpointer)UCONTEXT_REG_PC (sigctx);
+	return (gpointer)(gsize)UCONTEXT_REG_PC (sigctx);
 }
 
 /*

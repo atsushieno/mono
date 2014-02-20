@@ -2410,7 +2410,7 @@ GSList *mono_arch_get_trampolines               (gboolean aot) MONO_INTERNAL;
 
 /* Handle block guard */
 gpointer mono_arch_install_handler_block_guard (MonoJitInfo *ji, MonoJitExceptionInfo *clause, MonoContext *ctx, gpointer new_value) MONO_INTERNAL;
-gpointer mono_arch_create_handler_block_trampoline (void) MONO_INTERNAL;
+gpointer mono_arch_create_handler_block_trampoline (MonoTrampInfo **info, gboolean aot) MONO_INTERNAL;
 gpointer mono_create_handler_block_trampoline (void) MONO_INTERNAL;
 gboolean mono_install_handler_block_guard (MonoThreadUnwindState *ctx) MONO_INTERNAL;
 
@@ -2451,6 +2451,7 @@ MonoJitInfo * mono_find_jit_info                (MonoDomain *domain, MonoJitTlsD
 typedef gboolean (*MonoExceptionFrameWalk)      (MonoMethod *method, gpointer ip, size_t native_offset, gboolean managed, gpointer user_data);
 gboolean mono_exception_walk_trace              (MonoException *ex, MonoExceptionFrameWalk func, gpointer user_data);
 void mono_restore_context                       (MonoContext *ctx) MONO_INTERNAL;
+guint8* mono_jinfo_get_unwind_info              (MonoJitInfo *ji, guint32 *unwind_info_len) MONO_INTERNAL;
 
 gboolean
 mono_find_jit_info_ext (MonoDomain *domain, MonoJitTlsData *jit_tls, 
