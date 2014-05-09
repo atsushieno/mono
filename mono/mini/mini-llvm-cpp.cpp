@@ -37,11 +37,19 @@
 #include <llvm/ExecutionEngine/JITEventListener.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/Target/TargetRegisterInfo.h>
+#if LLVM_API_VERSION >= 1
+#include <llvm/IR/Verifier.h>
+#else
 #include <llvm/Analysis/Verifier.h>
+#endif
 #include <llvm/Analysis/Passes.h>
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Support/CommandLine.h>
+#if LLVM_API_VERSION >= 1
+#include "llvm/IR/LegacyPassNameParser.h"
+#else
 #include "llvm/Support/PassNameParser.h"
+#endif
 #include "llvm/Support/PrettyStackTrace.h"
 #include <llvm/CodeGen/Passes.h>
 #include <llvm/CodeGen/MachineFunctionPass.h>
@@ -243,6 +251,11 @@ MonoJITMemoryManager::endExceptionTable(const Function *F, unsigned char *TableS
 {
 }
 
+#else
+
+class MonoJITMemoryManager {
+};
+
 #endif /* !MONO_CROSS_COMPILE */
 
 class MonoJITEventListener : public JITEventListener {
@@ -275,21 +288,24 @@ public:
 	}
 };
 
-#ifndef MONO_CROSS_COMPILE
-static MonoJITMemoryManager *mono_mm;
-#endif
-static MonoJITEventListener *mono_event_listener;
-
-static FunctionPassManager *fpm;
+class MonoEE {
+public:
+	ExecutionEngine *EE;
+	MonoJITMemoryManager *mm;
+	MonoJITEventListener *listener;
+	FunctionPassManager *fpm;
+};
 
 void
-mono_llvm_optimize_method (LLVMValueRef method)
+mono_llvm_optimize_method (MonoEERef eeref, LLVMValueRef method)
 {
+	MonoEE *mono_ee = (MonoEE*)eeref;
+
 	/*
 	 * The verifier does some checks on the whole module, leading to quadratic behavior.
 	 */
 	//verifyFunction (*(unwrap<Function> (method)));
-	fpm->run (*unwrap<Function> (method));
+	mono_ee->fpm->run (*unwrap<Function> (method));
 }
 
 void
@@ -352,7 +368,11 @@ mono_llvm_build_cmpxchg (LLVMBuilderRef builder, LLVMValueRef ptr, LLVMValueRef 
 {
 	AtomicCmpXchgInst *ins;
 
+#if LLVM_API_VERSION >= 1
+	ins = unwrap(builder)->CreateAtomicCmpXchg (unwrap(ptr), unwrap (cmp), unwrap (val), SequentiallyConsistent, SequentiallyConsistent);
+#else
 	ins = unwrap(builder)->CreateAtomicCmpXchg (unwrap(ptr), unwrap (cmp), unwrap (val), SequentiallyConsistent);
+#endif
 	return wrap (ins);
 }
 
@@ -527,10 +547,13 @@ force_pass_linking (void)
 
 #ifndef MONO_CROSS_COMPILE
 
-LLVMExecutionEngineRef
-mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, FunctionEmittedCb *emitted_cb, ExceptionTableCb *exception_cb, DlSymCb *dlsym_cb)
+static gboolean inited;
+
+static void
+init_llvm (void)
 {
-  std::string Error;
+	if (inited)
+		return;
 
   force_pass_linking ();
 
@@ -544,9 +567,34 @@ mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, Func
   LLVMInitializeX86TargetMC ();
 #endif
 
-  mono_mm = new MonoJITMemoryManager ();
+  PassRegistry &Registry = *PassRegistry::getPassRegistry();
+  initializeCore(Registry);
+  initializeScalarOpts(Registry);
+  initializeAnalysis(Registry);
+  initializeIPA(Registry);
+  initializeTransformUtils(Registry);
+  initializeInstCombine(Registry);
+  initializeTarget(Registry);
+
+  llvm::cl::ParseEnvironmentOptions("mono", "MONO_LLVM", "");
+
+  inited = true;
+}
+
+MonoEERef
+mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, FunctionEmittedCb *emitted_cb, ExceptionTableCb *exception_cb, DlSymCb *dlsym_cb, LLVMExecutionEngineRef *ee)
+{
+  std::string Error;
+  MonoEE *mono_ee;
+
+  init_llvm ();
+
+  mono_ee = new MonoEE ();
+
+  MonoJITMemoryManager *mono_mm = new MonoJITMemoryManager ();
   mono_mm->alloc_cb = alloc_cb;
   mono_mm->dlsym_cb = dlsym_cb;
+  mono_ee->mm = mono_mm;
 
   /*
    * The Default code model doesn't seem to work on amd64,
@@ -564,25 +612,21 @@ mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, Func
   ExecutionEngine *EE = b.setJITMemoryManager (mono_mm).setTargetOptions (opts).setAllocateGVsWithCode (true).create ();
 #endif
   g_assert (EE);
+  mono_ee->EE = EE;
 
   EE->InstallExceptionTableRegister (exception_cb);
-  mono_event_listener = new MonoJITEventListener (emitted_cb);
-  EE->RegisterJITEventListener (mono_event_listener);
+  MonoJITEventListener *listener = new MonoJITEventListener (emitted_cb);
+  EE->RegisterJITEventListener (listener);
+  mono_ee->listener = listener;
 
-  fpm = new FunctionPassManager (unwrap (MP));
+  FunctionPassManager *fpm = new FunctionPassManager (unwrap (MP));
+  mono_ee->fpm = fpm;
 
+#if LLVM_API_VERSION >= 1
+  fpm->add(new DataLayoutPass(*EE->getDataLayout()));
+#else
   fpm->add(new DataLayout(*EE->getDataLayout()));
-
-  PassRegistry &Registry = *PassRegistry::getPassRegistry();
-  initializeCore(Registry);
-  initializeScalarOpts(Registry);
-  initializeAnalysis(Registry);
-  initializeIPA(Registry);
-  initializeTransformUtils(Registry);
-  initializeInstCombine(Registry);
-  initializeTarget(Registry);
-
-  llvm::cl::ParseEnvironmentOptions("mono", "MONO_LLVM", "");
+#endif
 
   if (PassList.size() > 0) {
 	  /* Use the passes specified by the env variable */
@@ -625,28 +669,34 @@ mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, Func
 	  */
   }
 
-  return wrap(EE);
+  *ee = wrap (EE);
+
+  return mono_ee;
 }
 
 void
-mono_llvm_dispose_ee (LLVMExecutionEngineRef ee)
+mono_llvm_dispose_ee (MonoEERef *eeref)
 {
-	delete unwrap (ee);
+	MonoEE *mono_ee = (MonoEE*)eeref;
 
-	delete fpm;
+	delete mono_ee->EE;
+	delete mono_ee->fpm;
+	//delete mono_ee->mm;
+	delete mono_ee->listener;
+	delete mono_ee;
 }
 
 #else
 
-LLVMExecutionEngineRef
-mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, FunctionEmittedCb *emitted_cb, ExceptionTableCb *exception_cb, DlSymCb *dlsym_cb)
+MonoEERef
+mono_llvm_create_ee (LLVMModuleProviderRef MP, AllocCodeMemoryCb *alloc_cb, FunctionEmittedCb *emitted_cb, ExceptionTableCb *exception_cb, DlSymCb *dlsym_cb, LLVMExecutionEngineRef *ee)
 {
 	g_assert_not_reached ();
 	return NULL;
 }
 
 void
-mono_llvm_dispose_ee (LLVMExecutionEngineRef ee)
+mono_llvm_dispose_ee (MonoEERef *eeref)
 {
 	g_assert_not_reached ();
 }

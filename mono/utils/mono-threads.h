@@ -28,6 +28,7 @@ typedef HANDLE MonoNativeThreadHandle; /* unused */
 typedef DWORD mono_native_thread_return_t;
 
 #define MONO_NATIVE_THREAD_ID_TO_UINT(tid) (tid)
+#define MONO_UINT_TO_NATIVE_THREAD_ID(tid) (tid)
 
 #else
 
@@ -51,6 +52,7 @@ typedef pthread_t MonoNativeThreadId;
 typedef void* mono_native_thread_return_t;
 
 #define MONO_NATIVE_THREAD_ID_TO_UINT(tid) (gsize)(tid)
+#define MONO_UINT_TO_NATIVE_THREAD_ID(tid) (MonoNativeThreadId)(gsize)(tid)
 
 #endif /* #ifdef HOST_WIN32 */
 
@@ -244,6 +246,9 @@ gboolean
 mono_thread_info_resume (MonoNativeThreadId tid) MONO_INTERNAL;
 
 void
+mono_thread_info_set_name (MonoNativeThreadId tid, const char *name) MONO_INTERNAL;
+
+void
 mono_thread_info_finish_suspend (void) MONO_INTERNAL;
 
 void
@@ -294,6 +299,12 @@ mono_thread_info_open_handle (void);
 HANDLE
 mono_threads_create_thread (LPTHREAD_START_ROUTINE start, gpointer arg, guint32 stack_size, guint32 creation_flags, MonoNativeThreadId *out_tid);
 
+int
+mono_threads_get_max_stack_size (void) MONO_INTERNAL;
+
+HANDLE
+mono_threads_open_thread_handle (HANDLE handle, MonoNativeThreadId tid) MONO_INTERNAL;
+
 #if !defined(HOST_WIN32)
 
 #if !defined(__MACH__)
@@ -320,6 +331,8 @@ gboolean mono_threads_core_yield (void) MONO_INTERNAL;
 void mono_threads_core_exit (int exit_code) MONO_INTERNAL;
 void mono_threads_core_unregister (THREAD_INFO_TYPE *info) MONO_INTERNAL;
 HANDLE mono_threads_core_open_handle (void) MONO_INTERNAL;
+HANDLE mono_threads_core_open_thread_handle (HANDLE handle, MonoNativeThreadId tid) MONO_INTERNAL;
+void mono_threads_core_set_name (MonoNativeThreadId tid, const char *name) MONO_INTERNAL;
 
 MonoNativeThreadId mono_native_thread_id_get (void) MONO_INTERNAL;
 
@@ -327,5 +340,9 @@ gboolean mono_native_thread_id_equals (MonoNativeThreadId id1, MonoNativeThreadI
 
 gboolean
 mono_native_thread_create (MonoNativeThreadId *tid, gpointer func, gpointer arg) MONO_INTERNAL;
+
+/*Mach specific internals */
+void mono_threads_init_dead_letter (void) MONO_INTERNAL;
+void mono_threads_install_dead_letter (void) MONO_INTERNAL;
 
 #endif /* __MONO_THREADS_H__ */

@@ -704,10 +704,7 @@ namespace Microsoft.Scripting.Interpreter {
                 _instructions.EmitBranchNull(nullValue);
                 CompileConvertToType (typeFrom, typeTo, isChecked);
                 _instructions.EmitWrap (typeTo);
-                _instructions.EmitBranch (end);                
                 _instructions.MarkLabel(nullValue);
-                _instructions.EmitDup (); // Keep null on the stack
-                _instructions.MarkLabel(end);
                 return;
             }
 
@@ -1478,6 +1475,10 @@ namespace Microsoft.Scripting.Interpreter {
             _instructions.EmitCreateDelegate(creator);
         }
 
+		private void CompileQuotedLambdaExpression(Expression expr) {
+			_instructions.EmitStore (expr);
+		}
+
         private void CompileCoalesceBinaryExpression(Expression expr) {
             var node = (BinaryExpression)expr;
 
@@ -1531,9 +1532,9 @@ namespace Microsoft.Scripting.Interpreter {
             throw new System.NotImplementedException();
         }
 
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", MessageId = "expr")]
-        private void CompileQuoteUnaryExpression(Expression expr) {
-            throw new System.NotImplementedException();
+		private void CompileQuoteUnaryExpression(Expression expr) {
+			var qe = (UnaryExpression)expr;
+			CompileQuotedLambdaExpression (qe.Operand);
         }
 
         private void CompileUnboxUnaryExpression(Expression expr) {
@@ -1575,9 +1576,14 @@ namespace Microsoft.Scripting.Interpreter {
             }
         }
 
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", MessageId = "expr")]
         private void CompileReducibleExpression(Expression expr) {
-            throw new System.NotImplementedException();
+            switch (expr.NodeType) {
+            case ExpressionType.PreIncrementAssign:
+                _instructions.EmitIncrement (expr.Type);
+                break;
+            default:
+                throw Assert.Unreachable;
+            }
         }
 
         internal void Compile(Expression expr, bool asVoid) {

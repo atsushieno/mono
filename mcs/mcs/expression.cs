@@ -301,10 +301,33 @@ namespace Mono.CSharp
 					return new ULongConstant (ec.BuiltinTypes, ~((ULongConstant) e).Value, e.Location);
 				}
 				if (e is EnumConstant) {
-					e = TryReduceConstant (ec, ((EnumConstant)e).Child);
-					if (e != null)
-						e = new EnumConstant (e, expr_type);
-					return e;
+					var res = TryReduceConstant (ec, ((EnumConstant)e).Child);
+					if (res != null) {
+						//
+						// Numeric promotion upgraded types to int but for enum constant
+						// original underlying constant type is needed
+						//
+						if (res.Type.BuiltinType == BuiltinTypeSpec.Type.Int) {
+							int v = ((IntConstant) res).Value;
+							switch (((EnumConstant) e).Child.Type.BuiltinType) {
+								case BuiltinTypeSpec.Type.UShort:
+								res = new UShortConstant (ec.BuiltinTypes, (ushort) v, e.Location);
+								break;
+								case BuiltinTypeSpec.Type.Short:
+								res = new ShortConstant (ec.BuiltinTypes, (short) v, e.Location);
+								break;
+								case BuiltinTypeSpec.Type.Byte:
+								res = new ByteConstant (ec.BuiltinTypes, (byte) v, e.Location);
+								break;
+								case BuiltinTypeSpec.Type.SByte:
+								res = new SByteConstant (ec.BuiltinTypes, (sbyte) v, e.Location);
+								break;
+							}
+						}
+
+						res = new EnumConstant (res, expr_type);
+					}
+					return res;
 				}
 				return null;
 			}
@@ -1604,12 +1627,15 @@ namespace Mono.CSharp
 							return CreateConstantResult (ec, !c.IsNull);
 
 						//
-						// Do not optimize for imported type
+						// Do not optimize for imported type or dynamic type
 						//
 						if (d.MemberDefinition.IsImported && d.BuiltinType != BuiltinTypeSpec.Type.None &&
 							d.MemberDefinition.DeclaringAssembly != t.MemberDefinition.DeclaringAssembly) {
 							return this;
 						}
+
+						if (d.BuiltinType == BuiltinTypeSpec.Type.Dynamic)
+							return this;
 						
 						//
 						// Turn is check into simple null check for implicitly convertible reference types
@@ -7492,7 +7518,7 @@ namespace Mono.CSharp
 							e = e.EmitToField (ec);
 						}
 
-						stackArray.EmitWithCleanup (ec, false);
+						stackArray.EmitLoad (ec);
 					} else {
 						ec.Emit (OpCodes.Dup);
 					}
@@ -7504,26 +7530,8 @@ namespace Mono.CSharp
 					// If we are dealing with a struct, get the
 					// address of it, so we can store it.
 					//
-					if (dims == 1 && etype.IsStruct) {
-						switch (etype.BuiltinType) {
-						case BuiltinTypeSpec.Type.Byte:
-						case BuiltinTypeSpec.Type.SByte:
-						case BuiltinTypeSpec.Type.Bool:
-						case BuiltinTypeSpec.Type.Short:
-						case BuiltinTypeSpec.Type.UShort:
-						case BuiltinTypeSpec.Type.Char:
-						case BuiltinTypeSpec.Type.Int:
-						case BuiltinTypeSpec.Type.UInt:
-						case BuiltinTypeSpec.Type.Long:
-						case BuiltinTypeSpec.Type.ULong:
-						case BuiltinTypeSpec.Type.Float:
-						case BuiltinTypeSpec.Type.Double:
-							break;
-						default:
-							ec.Emit (OpCodes.Ldelema, etype);
-							break;
-						}
-					}
+					if (dims == 1 && etype.IsStruct && !BuiltinTypeSpec.IsPrimitiveType (etype))
+						ec.Emit (OpCodes.Ldelema, etype);
 
 					e.Emit (ec);
 
@@ -7542,7 +7550,7 @@ namespace Mono.CSharp
 			}
 
 			if (stackArray != null)
-				stackArray.IsAvailableForReuse = true;
+				stackArray.PrepareCleanup (ec);
 		}
 
 		public override void Emit (EmitContext ec)
@@ -10017,6 +10025,10 @@ namespace Mono.CSharp
 			loc = Location.Null;
 		}
 
+		protected override void CloneTo (CloneContext clonectx, Expression target)
+		{
+		}
+
 		public override bool ContainsEmitWithAwait ()
 		{
 			return false;
@@ -11164,6 +11176,7 @@ namespace Mono.CSharp
 			type.Define ();
 			if ((ec.Report.Errors - errors) == 0) {
 				parent.Module.AddAnonymousType (type);
+				type.PrepareEmit ();
 			}
 
 			return type;
@@ -11292,6 +11305,15 @@ namespace Mono.CSharp
 		{
 			ec.Report.Error (828, loc, "An anonymous type property `{0}' cannot be initialized with `{1}'",
 				Name, initializer);
+		}
+	}
+
+	public class CatchFilterExpression : BooleanExpression
+	{
+		public CatchFilterExpression (Expression expr, Location loc)
+			: base (expr)
+		{
+			this.loc = loc;
 		}
 	}
 }

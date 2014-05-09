@@ -285,7 +285,7 @@ typedef struct {
 #define HEADER_LENGTH 11
 
 #define MAJOR_VERSION 2
-#define MINOR_VERSION 27
+#define MINOR_VERSION 32
 
 typedef enum {
 	CMD_SET_VM = 1,
@@ -300,6 +300,7 @@ typedef enum {
 	CMD_SET_METHOD = 22,
 	CMD_SET_TYPE = 23,
 	CMD_SET_MODULE = 24,
+	CMD_SET_FIELD = 25,
 	CMD_SET_EVENT = 64
 } CommandSet;
 
@@ -370,7 +371,8 @@ typedef enum {
 	STEP_FILTER_NONE = 0,
 	STEP_FILTER_STATIC_CTOR = 1,
 	STEP_FILTER_DEBUGGER_HIDDEN = 2,
-	STEP_FILTER_DEBUGGER_STEP_THROUGH = 4
+	STEP_FILTER_DEBUGGER_STEP_THROUGH = 4,
+	STEP_FILTER_DEBUGGER_NON_USER_CODE = 8
 } StepFilter;
 
 typedef enum {
@@ -422,7 +424,8 @@ typedef enum {
 	CMD_THREAD_GET_STATE = 3,
 	CMD_THREAD_GET_INFO = 4,
 	CMD_THREAD_GET_ID = 5,
-	CMD_THREAD_GET_TID = 6
+	CMD_THREAD_GET_TID = 6,
+	CMD_THREAD_SET_IP = 7
 } CmdThread;
 
 typedef enum {
@@ -459,6 +462,10 @@ typedef enum {
 } CmdModule;
 
 typedef enum {
+	CMD_FIELD_GET_INFO = 1,
+} CmdField;
+
+typedef enum {
 	CMD_METHOD_GET_NAME = 1,
 	CMD_METHOD_GET_DECLARING_TYPE = 2,
 	CMD_METHOD_GET_DEBUG_INFO = 3,
@@ -489,7 +496,8 @@ typedef enum {
 	CMD_TYPE_GET_METHODS_BY_NAME_FLAGS = 15,
 	CMD_TYPE_GET_INTERFACES = 16,
 	CMD_TYPE_GET_INTERFACE_MAP = 17,
-	CMD_TYPE_IS_INITIALIZED = 18
+	CMD_TYPE_IS_INITIALIZED = 18,
+	CMD_TYPE_CREATE_INSTANCE = 19
 } CmdType;
 
 typedef enum {
@@ -889,7 +897,7 @@ mono_debugger_agent_parse_options (char *options)
 		/* Waiting for deferred attachment */
 		agent_config.defer = TRUE;
 		if (agent_config.address == NULL) {
-			agent_config.address = g_strdup_printf ("0.0.0.0:%u", 56000 + (GetCurrentProcessId () % 1000));
+			agent_config.address = g_strdup_printf ("0.0.0.0:%u", 56000 + (getpid () % 1000));
 		}
 	}
 
@@ -2199,6 +2207,7 @@ decode_ptr_id (guint8 *buf, guint8 **endbuf, guint8 *limit, IdType type, MonoDom
 	mono_loader_unlock ();
 
 	if (res->domain == NULL) {
+		DEBUG (0, fprintf (log_file, "ERR_UNLOADED, id=%d, type=%d.\n", id, type));
 		*err = ERR_UNLOADED;
 		return NULL;
 	}
@@ -2804,7 +2813,7 @@ resume_thread (MonoInternalThread *thread)
 
 	g_assert (suspend_count > 0);
 
-	DEBUG(1, fprintf (log_file, "[%p] Resuming thread...\n", (gpointer)(gssize)thread->tid));
+	DEBUG(1, fprintf (log_file, "[sdb] Resuming thread %p...\n", (gpointer)(gssize)thread->tid));
 
 	tls->resume_count += suspend_count;
 
@@ -3407,7 +3416,7 @@ create_event_list (EventKind event, GPtrArray *reqs, MonoJitInfo *ji, EventInfo 
 						MonoDebugMethodInfo *minfo = mono_debug_lookup_method (method);
 
 						if (minfo) {
-							mono_debug_symfile_get_line_numbers_full (minfo, &source_file, &source_file_list, NULL, NULL, NULL, NULL, NULL);
+							mono_debug_symfile_get_line_numbers_full (minfo, &source_file, &source_file_list, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 							for (i = 0; i < source_file_list->len; ++i) {
 								sinfo = g_ptr_array_index (source_file_list, i);
 								/*
@@ -3489,6 +3498,32 @@ create_event_list (EventKind event, GPtrArray *reqs, MonoJitInfo *ji, EventInfo 
 							ji->dbg_step_through_inited = TRUE;
 						}
 						if (ji->dbg_step_through)
+							filtered = TRUE;
+					}
+					if ((mod->data.filter & STEP_FILTER_DEBUGGER_NON_USER_CODE) && ji) {
+						MonoCustomAttrInfo *ainfo;
+						static MonoClass *klass;
+
+						if (!klass) {
+							klass = mono_class_from_name (mono_defaults.corlib, "System.Diagnostics", "DebuggerNonUserCodeAttribute");
+							g_assert (klass);
+						}
+						if (!ji->dbg_non_user_code_inited) {
+							ainfo = mono_custom_attrs_from_method (jinfo_get_method (ji));
+							if (ainfo) {
+								if (mono_custom_attrs_has_attr (ainfo, klass))
+									ji->dbg_non_user_code = TRUE;
+								mono_custom_attrs_free (ainfo);
+							}
+							ainfo = mono_custom_attrs_from_class (jinfo_get_method (ji)->klass);
+							if (ainfo) {
+								if (mono_custom_attrs_has_attr (ainfo, klass))
+									ji->dbg_non_user_code = TRUE;
+								mono_custom_attrs_free (ainfo);
+							}
+							ji->dbg_non_user_code_inited = TRUE;
+						}
+						if (ji->dbg_non_user_code)
 							filtered = TRUE;
 					}
 				}
@@ -5294,7 +5329,7 @@ mono_debugger_agent_debug_log_is_enabled (void)
 	return agent_config.enabled;
 }
 
-#ifdef PLATFORM_ANDROID
+#if defined(PLATFORM_ANDROID) || defined(TARGET_ANDROID)
 void
 mono_debugger_agent_unhandled_exception (MonoException *exc)
 {
@@ -6532,7 +6567,7 @@ get_source_files_for_type (MonoClass *klass)
 		GPtrArray *source_file_list;
 
 		if (minfo) {
-			mono_debug_symfile_get_line_numbers_full (minfo, NULL, &source_file_list, NULL, NULL, NULL, NULL, NULL);
+			mono_debug_symfile_get_line_numbers_full (minfo, NULL, &source_file_list, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 			for (j = 0; j < source_file_list->len; ++j) {
 				sinfo = g_ptr_array_index (source_file_list, j);
 				for (i = 0; i < files->len; ++i)
@@ -7405,6 +7440,29 @@ module_commands (int command, guint8 *p, guint8 *end, Buffer *buf)
 	return ERR_NONE;
 }
 
+static ErrorCode
+field_commands (int command, guint8 *p, guint8 *end, Buffer *buf)
+{
+	int err;
+	MonoDomain *domain;
+
+	switch (command) {
+	case CMD_FIELD_GET_INFO: {
+		MonoClassField *f = decode_fieldid (p, &p, end, &domain, &err);
+
+		buffer_add_string (buf, f->name);
+		buffer_add_typeid (buf, domain, f->parent);
+		buffer_add_typeid (buf, domain, mono_class_from_mono_type (f->type));
+		buffer_add_int (buf, f->type->attrs);
+		break;
+	}
+	default:
+		return ERR_NOT_IMPLEMENTED;
+	}
+
+	return ERR_NONE;
+}
+
 static void
 buffer_add_cattr_arg (Buffer *buf, MonoType *t, MonoDomain *domain, MonoObject *val)
 {
@@ -7934,6 +7992,13 @@ type_commands_internal (int command, MonoClass *klass, MonoDomain *domain, guint
 			buffer_add_int (buf, 0);
 		break;
 	}
+	case CMD_TYPE_CREATE_INSTANCE: {
+		MonoObject *obj;
+
+		obj = mono_object_new (domain, klass);
+		buffer_add_objid (buf, obj);
+		break;
+	}
 	default:
 		return ERR_NOT_IMPLEMENTED;
 	}
@@ -7986,6 +8051,8 @@ method_commands_internal (int command, MonoMethod *method, MonoDomain *domain, g
 		int *il_offsets;
 		int *line_numbers;
 		int *column_numbers;
+		int *end_line_numbers;
+		int *end_column_numbers;
 		int *source_files;
 		GPtrArray *source_file_list;
 
@@ -8006,7 +8073,7 @@ method_commands_internal (int command, MonoMethod *method, MonoDomain *domain, g
 			break;
 		}
 
-		mono_debug_symfile_get_line_numbers_full (minfo, &source_file, &source_file_list, &n_il_offsets, &il_offsets, &line_numbers, &column_numbers, &source_files);
+		mono_debug_symfile_get_line_numbers_full (minfo, &source_file, &source_file_list, &n_il_offsets, &il_offsets, &line_numbers, &column_numbers, &source_files, &end_line_numbers, &end_column_numbers);
 		buffer_add_int (buf, header->code_size);
 		if (CHECK_PROTOCOL_VERSION (2, 13)) {
 			buffer_add_int (buf, source_file_list->len);
@@ -8037,10 +8104,17 @@ method_commands_internal (int command, MonoMethod *method, MonoDomain *domain, g
 				buffer_add_int (buf, source_files [i]);
 			if (CHECK_PROTOCOL_VERSION (2, 19))
 				buffer_add_int (buf, column_numbers ? column_numbers [i] : -1);
+			if (CHECK_PROTOCOL_VERSION (2, 32)) {
+				buffer_add_int (buf, end_line_numbers ? end_line_numbers [i] : -1);
+				buffer_add_int (buf, end_column_numbers ? end_column_numbers [i] : -1);
+			}
 		}
 		g_free (source_file);
 		g_free (il_offsets);
 		g_free (line_numbers);
+		g_free (column_numbers);
+		g_free (end_line_numbers);
+		g_free (end_column_numbers);
 		g_free (source_files);
 		g_ptr_array_free (source_file_list, TRUE);
 		mono_metadata_free_mh (header);
@@ -8457,6 +8531,52 @@ thread_commands (int command, guint8 *p, guint8 *end, Buffer *buf)
 	case CMD_THREAD_GET_TID:
 		buffer_add_long (buf, (guint64)thread->tid);
 		break;
+	case CMD_THREAD_SET_IP: {
+		DebuggerTlsData *tls;
+		MonoMethod *method;
+		MonoDomain *domain;
+		MonoSeqPointInfo *seq_points;
+		SeqPoint *sp = NULL;
+		gint64 il_offset;
+		int i;
+
+		method = decode_methodid (p, &p, end, &domain, &err);
+		if (err)
+			return err;
+		il_offset = decode_long (p, &p, end);
+
+		while (!is_suspended ()) {
+			if (suspend_count)
+				wait_for_suspend ();
+		}
+
+		mono_loader_lock ();
+		tls = mono_g_hash_table_lookup (thread_to_tls, thread);
+		mono_loader_unlock ();
+		g_assert (tls);
+
+		compute_frame_info (thread, tls);
+		if (tls->frame_count == 0 || tls->frames [0]->actual_method != method)
+			return ERR_INVALID_ARGUMENT;
+
+		seq_points = get_seq_points (domain, method);
+		g_assert (seq_points);
+
+		for (i = 0; i < seq_points->len; ++i) {
+			sp = &seq_points->seq_points [i];
+
+			if (sp->il_offset == il_offset)
+				break;
+		}
+		if (i == seq_points->len)
+			return ERR_INVALID_ARGUMENT;
+
+		// FIXME: Check that the ip change is safe
+
+		DEBUG (1, fprintf (log_file, "[dbg] Setting IP to %s:0x%0x(0x%0x)\n", tls->frames [0]->actual_method->name, (int)sp->il_offset, (int)sp->native_offset));
+		MONO_CONTEXT_SET_IP (&tls->restore_ctx, (guint8*)tls->frames [0]->ji->code_start + sp->native_offset);
+		break;
+	}
 	default:
 		return ERR_NOT_IMPLEMENTED;
 	}
@@ -8858,27 +8978,29 @@ command_set_to_string (CommandSet command_set)
 	case CMD_SET_OBJECT_REF:
 		return "OBJECT_REF";
 	case CMD_SET_STRING_REF:
-		return "STRING_REF"; 
+		return "STRING_REF";
 	case CMD_SET_THREAD:
-		return "THREAD"; 
+		return "THREAD";
 	case CMD_SET_ARRAY_REF:
-		return "ARRAY_REF"; 
+		return "ARRAY_REF";
 	case CMD_SET_EVENT_REQUEST:
-		return "EVENT_REQUEST"; 
+		return "EVENT_REQUEST";
 	case CMD_SET_STACK_FRAME:
-		return "STACK_FRAME"; 
+		return "STACK_FRAME";
 	case CMD_SET_APPDOMAIN:
-		return "APPDOMAIN"; 
+		return "APPDOMAIN";
 	case CMD_SET_ASSEMBLY:
-		return "ASSEMBLY"; 
+		return "ASSEMBLY";
 	case CMD_SET_METHOD:
-		return "METHOD"; 
+		return "METHOD";
 	case CMD_SET_TYPE:
-		return "TYPE"; 
+		return "TYPE";
 	case CMD_SET_MODULE:
-		return "MODULE"; 
+		return "MODULE";
+	case CMD_SET_FIELD:
+		return "FIELD";
 	case CMD_SET_EVENT:
-		return "EVENT"; 
+		return "EVENT";
 	default:
 		return "";
 	}
@@ -8906,7 +9028,8 @@ static const char* thread_cmds_str[] = {
 	"GET_STATE",
 	"GET_INFO",
 	"GET_ID",
-	"GET_TID"
+	"GET_TID",
+	"SET_IP"
 };
 
 static const char* event_cmds_str[] = {
@@ -8935,6 +9058,10 @@ static const char* assembly_cmds_str[] = {
 };
 
 static const char* module_cmds_str[] = {
+	"GET_INFO",
+};
+
+static const char* field_cmds_str[] = {
 	"GET_INFO",
 };
 
@@ -9054,6 +9181,10 @@ cmd_to_string (CommandSet set, int command)
 	case CMD_SET_MODULE:
 		cmds = module_cmds_str;
 		cmds_len = G_N_ELEMENTS (module_cmds_str);
+		break;
+	case CMD_SET_FIELD:
+		cmds = field_cmds_str;
+		cmds_len = G_N_ELEMENTS (field_cmds_str);
 		break;
 	case CMD_SET_EVENT:
 		cmds = event_cmds_str;
@@ -9205,6 +9336,9 @@ debugger_thread (void *arg)
 			break;
 		case CMD_SET_MODULE:
 			err = module_commands (command, p, end, &buf);
+			break;
+		case CMD_SET_FIELD:
+			err = field_commands (command, p, end, &buf);
 			break;
 		case CMD_SET_TYPE:
 			err = type_commands (command, p, end, &buf);

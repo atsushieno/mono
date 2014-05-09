@@ -2780,6 +2780,17 @@ namespace Mono.CSharp {
 
 								ct = ct.DeclaringType;
 							} while (ct != null);
+						} else {
+							var cos = rc.CurrentMemberDefinition.Parent as ClassOrStruct;
+							if (cos != null && cos.PrimaryConstructorParameters != null) {
+								foreach (var p in cos.PrimaryConstructorParameters.FixedParameters) {
+									if (p.Name == Name) {
+										rc.Report.Error (9007, loc, "Primary constructor parameter `{0}' is not available in this context when using ref or out modifier",
+											Name);
+										return null;
+									}
+								}
+							}
 						}
 
 						if ((restrictions & MemberLookupRestrictions.InvocableOnly) == 0) {
@@ -3416,14 +3427,25 @@ namespace Mono.CSharp {
 
 			if (InstanceExpression == null || InstanceExpression is TypeExpr) {
 				if (InstanceExpression != null || !This.IsThisAvailable (rc, true)) {
-					if (rc.HasSet (ResolveContext.Options.FieldInitializerScope))
+					if (rc.HasSet (ResolveContext.Options.FieldInitializerScope)) {
 						rc.Report.Error (236, loc,
 							"A field initializer cannot reference the nonstatic field, method, or property `{0}'",
 							GetSignatureForError ());
-					else
-						rc.Report.Error (120, loc,
-							"An object reference is required to access non-static member `{0}'",
-							GetSignatureForError ());
+					} else {
+						var fe = this as FieldExpr;
+						if (fe != null && fe.Spec.MemberDefinition is PrimaryConstructorField) {
+							if (rc.HasSet (ResolveContext.Options.BaseInitializer)) {
+								rc.Report.Error (9005, loc, "Constructor initializer cannot access primary constructor parameters");
+							} else  {
+								rc.Report.Error (9006, loc, "An object reference is required to access primary constructor parameter `{0}'",
+									fe.Name);
+							}
+						} else {
+							rc.Report.Error (120, loc,
+								"An object reference is required to access non-static member `{0}'",
+								GetSignatureForError ());
+						}
+					}
 
 					InstanceExpression = new CompilerGeneratedThis (rc.CurrentType, loc).Resolve (rc);
 					return false;
@@ -4377,7 +4399,7 @@ namespace Mono.CSharp {
 			AParametersCollection best_pd = ((IParametersMember) best).Parameters;
 
 			bool better_at_least_one = false;
-			bool same = true;
+			bool are_equivalent = true;
 			int args_count = args == null ? 0 : args.Count;
 			int j = 0;
 			Argument a = null;
@@ -4422,7 +4444,7 @@ namespace Mono.CSharp {
 				if (TypeSpecComparer.IsEqual (ct, bt))
 					continue;
 
-				same = false;
+				are_equivalent = false;
 				int result = BetterExpressionConversion (ec, a, ct, bt);
 
 				// for each argument, the conversion to 'ct' should be no worse than 
@@ -4440,67 +4462,62 @@ namespace Mono.CSharp {
 				return true;
 
 			//
-			// This handles the case
+			// Tie-breaking rules are applied only for equivalent parameter types
 			//
-			//   Add (float f1, float f2, float f3);
-			//   Add (params decimal [] foo);
-			//
-			// The call Add (3, 4, 5) should be ambiguous.  Without this check, the
-			// first candidate would've chosen as better.
-			//
-			if (!same && !a.IsDefaultArgument)
+			if (!are_equivalent)
 				return false;
 
 			//
-			// The two methods have equal non-optional parameter types, apply tie-breaking rules
+			// If candidate is applicable in its normal form and best has a params array and is applicable
+			// only in its expanded form, then candidate is better
 			//
+			if (candidate_params != best_params)
+				return !candidate_params;
 
 			//
-			// This handles the following cases:
+			// We have not reached end of parameters list due to params or used default parameters
 			//
-			//  Foo (int i) is better than Foo (int i, long l = 0)
-			//  Foo (params int[] args) is better than Foo (int i = 0, params int[] args)
-			//  Foo (string s, params string[] args) is better than Foo (params string[] args)
-			//
-			// Prefer non-optional version
-			//
-			// LAMESPEC: Specification claims this should be done at last but the opposite is true
-			//
-			if (candidate_params == best_params && candidate_pd.Count != best_pd.Count) {
-				if (j < candidate_pd.Count && candidate_pd.FixedParameters[j].HasDefaultValue)
-					return false;
+			while (j < candidate_pd.Count && j < best_pd.Count) {
+				var cand_param = candidate_pd.FixedParameters [j];
+				var best_param = best_pd.FixedParameters [j];
 
-				if (j < best_pd.Count && best_pd.FixedParameters[j].HasDefaultValue)
-					return true;
+				if (candidate_pd.Count == best_pd.Count) {
+					//
+					// LAMESPEC:
+					//
+					// void Foo (params int[]) is better than void Foo (int i = 0) for Foo ()
+					// void Foo (string[] s, string value = null) is better than Foo (string s, params string[]) for Foo (null) or Foo ()
+					//
+					if (cand_param.HasDefaultValue != best_param.HasDefaultValue)
+						return !candidate_params;
 
-				return candidate_pd.Count >= best_pd.Count;
+					if (cand_param.HasDefaultValue) {
+						++j;
+						continue;
+					}
+				} else {
+					//
+					// Neither is better when not all arguments are provided
+					//
+					// void Foo (string s, int i = 0) <-> Foo (string s, int i = 0, int i2 = 0)
+					// void Foo (string s, int i = 0) <-> Foo (string s, byte i = 0)
+					// void Foo (string s, params int[]) <-> Foo (string s, params byte[])
+					//
+					if (cand_param.HasDefaultValue && best_param.HasDefaultValue)
+						return false;
+				}
+
+				break;
 			}
+
+			if (candidate_pd.Count != best_pd.Count)
+				return candidate_pd.Count < best_pd.Count;
 
 			//
 			// One is a non-generic method and second is a generic method, then non-generic is better
 			//
 			if (best.IsGeneric != candidate.IsGeneric)
 				return best.IsGeneric;
-
-			//
-			// This handles the following cases:
-			//
-			//   Trim () is better than Trim (params char[] chars)
-			//   Concat (string s1, string s2, string s3) is better than
-			//     Concat (string s1, params string [] srest)
-			//   Foo (int, params int [] rest) is better than Foo (params int [] rest)
-			//
-			// Prefer non-expanded version
-			//
-			if (candidate_params != best_params)
-				return best_params;
-
-			int candidate_param_count = candidate_pd.Count;
-			int best_param_count = best_pd.Count;
-
-			if (candidate_param_count != best_param_count)
-				// can only happen if (candidate_params && best_params)
-				return candidate_param_count > best_param_count && best_pd.HasParams;
 
 			//
 			// Both methods have the same number of parameters, and the parameters have equal types
@@ -4911,12 +4928,6 @@ namespace Mono.CSharp {
 					return (arg_count - i) * 2 + score;
 				}
 			}
-
-			//
-			// When params parameter has no argument it will be provided later if the method is the best candidate
-			//
-			if (arg_count + 1 == pd.Count && (cpd.FixedParameters [arg_count].ModFlags & Parameter.Modifier.PARAMS) != 0)
-				params_expanded_form = true;
 
 			//
 			// Restore original arguments for dynamic binder to keep the intention of original source code
@@ -5808,6 +5819,14 @@ namespace Mono.CSharp {
 			if (vr != null) {
 				vr.SetHasAddressTaken ();
 			}
+		}
+
+		protected override void CloneTo (CloneContext clonectx, Expression target)
+		{
+			var t = (FieldExpr) target;
+
+			if (InstanceExpression != null)
+				t.InstanceExpression = InstanceExpression.Clone (clonectx);
 		}
 
 		public override Expression CreateExpressionTree (ResolveContext ec)

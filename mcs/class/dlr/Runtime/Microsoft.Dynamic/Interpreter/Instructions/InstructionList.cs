@@ -365,6 +365,10 @@ namespace Microsoft.Scripting.Interpreter {
             Emit(PopInstruction.Instance);
         }
 
+        public void EmitStore(object value) {
+            Emit (new PushValueInstruction (value));
+        }
+
         #endregion
 
         #region Locals
@@ -663,6 +667,11 @@ namespace Microsoft.Scripting.Interpreter {
         }
 
         #endregion
+
+        public void EmitIncrement (Type type) {
+            Emit (new PushValueInstruction (1));
+            EmitAdd (type, false);
+        }
 
         public void EmitShl(Type type, bool lifted) {
             Emit(lifted ? ShlInstruction.CreateLifted(type) : ShlInstruction.Create(type));

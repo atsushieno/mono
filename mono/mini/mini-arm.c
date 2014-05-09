@@ -86,9 +86,6 @@ mono_arch_nacl_skip_nops (guint8 *code)
 void sys_icache_invalidate (void *start, size_t len);
 #endif
 
-static gint lmf_tls_offset = -1;
-static gint lmf_addr_tls_offset = -1;
-
 /* This mutex protects architecture specific caches */
 #define mono_mini_arch_lock() EnterCriticalSection (&mini_arch_mutex)
 #define mono_mini_arch_unlock() LeaveCriticalSection (&mini_arch_mutex)
@@ -522,7 +519,7 @@ emit_float_args (MonoCompile *cfg, MonoCallInst *inst, guint8 *code, int *max_le
 		gboolean imm = arm_is_fpimm8 (var->inst_offset);
 
 		/* 4+1 insns for emit_big_add () and 1 for FLDS. */
-		if (imm)
+		if (!imm)
 			*max_len += 20 + 4;
 
 		*max_len += 4;
@@ -587,7 +584,7 @@ mono_arm_emit_vfp_scratch_restore (MonoCompile *cfg, guint8 *code, int reg)
 }
 
 /*
- * emit_save_lmf:
+ * emit_restore_lmf:
  *
  *   Emit code to pop an LMF structure from the LMF stack.
  */
@@ -748,9 +745,11 @@ gpointer
 mono_arch_get_delegate_invoke_impl (MonoMethodSignature *sig, gboolean has_target)
 {
 	guint8 *code, *start;
+	MonoType *sig_ret;
 
 	/* FIXME: Support more cases */
-	if (MONO_TYPE_ISSTRUCT (sig->ret))
+	sig_ret = mini_type_get_underlying_type (NULL, sig->ret);
+	if (MONO_TYPE_ISSTRUCT (sig_ret))
 		return NULL;
 
 	if (has_target) {
@@ -1552,6 +1551,9 @@ get_call_info (MonoGenericSharingContext *gsctx, MonoMemPool *mp, MonoMethodSign
 				gr += n_in_regs;
 				nwords -= n_in_regs;
 			}
+			if (sig->call_convention == MONO_CALL_VARARG)
+				/* This matches the alignment in mono_ArgIterator_IntGetNextArg () */
+				stack_size = ALIGN_TO (stack_size, align);
 			ainfo->offset = stack_size;
 			/*g_print ("offset for arg %d at %d\n", n, stack_size);*/
 			stack_size += nwords * sizeof (gpointer);
@@ -1694,6 +1696,40 @@ get_call_info (MonoGenericSharingContext *gsctx, MonoMemPool *mp, MonoMethodSign
 	return cinfo;
 }
 
+
+gboolean
+mono_arch_tail_call_supported (MonoCompile *cfg, MonoMethodSignature *caller_sig, MonoMethodSignature *callee_sig)
+{
+	MonoType *callee_ret;
+	CallInfo *c1, *c2;
+	gboolean res;
+
+	if (cfg->compile_aot && !cfg->full_aot)
+		/* OP_TAILCALL doesn't work with AOT */
+		return FALSE;
+
+	c1 = get_call_info (NULL, NULL, caller_sig);
+	c2 = get_call_info (NULL, NULL, callee_sig);
+
+	/*
+	 * Tail calls with more callee stack usage than the caller cannot be supported, since
+	 * the extra stack space would be left on the stack after the tail call.
+	 */
+	res = c1->stack_usage >= c2->stack_usage;
+	callee_ret = mini_replace_type (callee_sig->ret);
+	if (callee_ret && MONO_TYPE_ISSTRUCT (callee_ret) && c2->ret.storage != RegTypeStructByVal)
+		/* An address on the callee's stack is passed as the first argument */
+		res = FALSE;
+
+	if (c2->stack_usage > 16 * 4)
+		res = FALSE;
+
+	g_free (c1);
+	g_free (c2);
+
+	return res;
+}
+
 #ifndef DISABLE_JIT
 
 static gboolean
@@ -1786,6 +1822,7 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 	MonoMethodSignature *sig;
 	MonoMethodHeader *header;
 	MonoInst *ins;
+	MonoType *sig_ret;
 	int i, offset, size, align, curinst;
 	CallInfo *cinfo;
 	guint32 ualign;
@@ -1795,6 +1832,7 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 	if (!cfg->arch.cinfo)
 		cfg->arch.cinfo = get_call_info (cfg->generic_sharing_context, cfg->mempool, sig);
 	cinfo = cfg->arch.cinfo;
+	sig_ret = mini_replace_type (sig->ret);
 
 	mono_arch_compute_omit_fp (cfg);
 
@@ -1824,8 +1862,8 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 
 	offset = 0;
 	curinst = 0;
-	if (!MONO_TYPE_ISSTRUCT (sig->ret) && !cinfo->vtype_retaddr) {
-		if (sig->ret->type != MONO_TYPE_VOID) {
+	if (!MONO_TYPE_ISSTRUCT (sig_ret) && !cinfo->vtype_retaddr) {
+		if (sig_ret->type != MONO_TYPE_VOID) {
 			cfg->ret->opcode = OP_REGVAR;
 			cfg->ret->inst_c0 = ARMREG_R0;
 		}
@@ -1932,6 +1970,20 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 		ins->inst_basereg = cfg->frame_reg;
 		ins->inst_offset = offset;
 		offset += size;
+	}
+
+	if (cfg->has_atomic_exchange_i4 || cfg->has_atomic_cas_i4 || cfg->has_atomic_add_new_i4) {
+		/* Allocate a temporary used by the atomic ops */
+		size = 4;
+		align = 4;
+
+		/* Allocate a local slot to hold the sig cookie address */
+		offset += align - 1;
+		offset &= ~(align - 1);
+		cfg->arch.atomic_tmp_offset = offset;
+		offset += size;
+	} else {
+		cfg->arch.atomic_tmp_offset = -1;
 	}
 
 	cfg->locals_min_stack_offset = offset;
@@ -2781,11 +2833,13 @@ mono_arch_finish_dyn_call (MonoDynCallInfo *info, guint8 *buf)
 {
 	ArchDynCallInfo *ainfo = (ArchDynCallInfo*)info;
 	MonoMethodSignature *sig = ((ArchDynCallInfo*)info)->sig;
+	MonoType *ptype;
 	guint8 *ret = ((DynCallArgs*)buf)->ret;
 	mgreg_t res = ((DynCallArgs*)buf)->res;
 	mgreg_t res2 = ((DynCallArgs*)buf)->res2;
 
-	switch (mono_type_get_underlying_type (sig->ret)->type) {
+	ptype = mini_type_get_underlying_type (NULL, sig->ret);
+	switch (ptype->type) {
 	case MONO_TYPE_VOID:
 		*(gpointer*)ret = NULL;
 		break;
@@ -2826,7 +2880,7 @@ mono_arch_finish_dyn_call (MonoDynCallInfo *info, guint8 *buf)
 		((gint32*)ret) [1] = res2;
 		break;
 	case MONO_TYPE_GENERICINST:
-		if (MONO_TYPE_IS_REFERENCE (sig->ret)) {
+		if (MONO_TYPE_IS_REFERENCE (ptype)) {
 			*(gpointer*)ret = (gpointer)res;
 			break;
 		} else {
@@ -2878,7 +2932,8 @@ enum {
 	SAVE_STRUCT,
 	SAVE_ONE,
 	SAVE_TWO,
-	SAVE_FP
+	SAVE_ONE_FP,
+	SAVE_TWO_FP
 };
 
 void*
@@ -2888,7 +2943,8 @@ mono_arch_instrument_epilog_full (MonoCompile *cfg, void *func, void *p, gboolea
 	int save_mode = SAVE_NONE;
 	int offset;
 	MonoMethod *method = cfg->method;
-	int rtype = mini_type_get_underlying_type (cfg->generic_sharing_context, mono_method_signature (method)->ret)->type;
+	MonoType *ret_type = mini_type_get_underlying_type (cfg->generic_sharing_context, mono_method_signature (method)->ret);
+	int rtype = ret_type->type;
 	int save_offset = cfg->param_area;
 	save_offset += 7;
 	save_offset &= ~7;
@@ -2913,9 +2969,23 @@ mono_arch_instrument_epilog_full (MonoCompile *cfg, void *func, void *p, gboolea
 		save_mode = SAVE_TWO;
 		break;
 	case MONO_TYPE_R4:
-	case MONO_TYPE_R8:
-		save_mode = SAVE_FP;
+		if (IS_HARD_FLOAT)
+			save_mode = SAVE_ONE_FP;
+		else
+			save_mode = SAVE_ONE;
 		break;
+	case MONO_TYPE_R8:
+		if (IS_HARD_FLOAT)
+			save_mode = SAVE_TWO_FP;
+		else
+			save_mode = SAVE_TWO;
+		break;
+	case MONO_TYPE_GENERICINST:
+		if (!mono_type_generic_inst_is_valuetype (ret_type)) {
+			save_mode = SAVE_ONE;
+			break;
+		}
+		/* Fall through */
 	case MONO_TYPE_VALUETYPE:
 		save_mode = SAVE_STRUCT;
 		break;
@@ -2939,10 +3009,16 @@ mono_arch_instrument_epilog_full (MonoCompile *cfg, void *func, void *p, gboolea
 			ARM_MOV_REG_REG (code, ARMREG_R1, ARMREG_R0);
 		}
 		break;
-	case SAVE_FP:
-		/* FIXME: what reg?  */
+	case SAVE_ONE_FP:
+		ARM_FSTS (code, ARM_VFP_F0, cfg->frame_reg, save_offset);
 		if (enable_arguments) {
-			/* FIXME: what reg?  */
+			ARM_FMRS (code, ARMREG_R1, ARM_VFP_F0);
+		}
+		break;
+	case SAVE_TWO_FP:
+		ARM_FSTD (code, ARM_VFP_D0, cfg->frame_reg, save_offset);
+		if (enable_arguments) {
+			ARM_FMDRR (code, ARMREG_R1, ARMREG_R2, ARM_VFP_D0);
 		}
 		break;
 	case SAVE_STRUCT:
@@ -2968,8 +3044,11 @@ mono_arch_instrument_epilog_full (MonoCompile *cfg, void *func, void *p, gboolea
 	case SAVE_ONE:
 		ARM_LDR_IMM (code, ARMREG_R0, cfg->frame_reg, save_offset);
 		break;
-	case SAVE_FP:
-		/* FIXME */
+	case SAVE_ONE_FP:
+		ARM_FLDS (code, ARM_VFP_F0, cfg->frame_reg, save_offset);
+		break;
+	case SAVE_TWO_FP:
+		ARM_FLDD (code, ARM_VFP_D0, cfg->frame_reg, save_offset);
 		break;
 	case SAVE_NONE:
 	default:
@@ -4085,6 +4164,73 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			g_assert_not_reached ();
 #endif
 			break;
+		case OP_ATOMIC_EXCHANGE_I4:
+		case OP_ATOMIC_CAS_I4:
+		case OP_ATOMIC_ADD_NEW_I4: {
+			int tmpreg;
+			guint8 *buf [16];
+
+			g_assert (v7_supported);
+
+			/* Free up a reg */
+			if (ins->sreg1 != ARMREG_IP && ins->sreg2 != ARMREG_IP && ins->sreg3 != ARMREG_IP)
+				tmpreg = ARMREG_IP;
+			else if (ins->sreg1 != ARMREG_R0 && ins->sreg2 != ARMREG_R0 && ins->sreg3 != ARMREG_R0)
+				tmpreg = ARMREG_R0;
+			else if (ins->sreg1 != ARMREG_R1 && ins->sreg2 != ARMREG_R1 && ins->sreg3 != ARMREG_R1)
+				tmpreg = ARMREG_R1;
+			else
+				tmpreg = ARMREG_R2;
+			g_assert (cfg->arch.atomic_tmp_offset != -1);
+			ARM_STR_IMM (code, tmpreg, cfg->frame_reg, cfg->arch.atomic_tmp_offset);
+
+			switch (ins->opcode) {
+			case OP_ATOMIC_EXCHANGE_I4:
+				buf [0] = code;
+				ARM_DMB (code, ARM_DMB_SY);
+				ARM_LDREX_REG (code, ARMREG_LR, ins->sreg1);
+				ARM_STREX_REG (code, tmpreg, ins->sreg2, ins->sreg1);
+				ARM_CMP_REG_IMM (code, tmpreg, 0, 0);
+				buf [1] = code;
+				ARM_B_COND (code, ARMCOND_NE, 0);
+				arm_patch (buf [1], buf [0]);
+				break;
+			case OP_ATOMIC_CAS_I4:
+				ARM_DMB (code, ARM_DMB_SY);
+				buf [0] = code;
+				ARM_LDREX_REG (code, ARMREG_LR, ins->sreg1);
+				ARM_CMP_REG_REG (code, ARMREG_LR, ins->sreg3);
+				buf [1] = code;
+				ARM_B_COND (code, ARMCOND_NE, 0);
+				ARM_STREX_REG (code, tmpreg, ins->sreg2, ins->sreg1);
+				ARM_CMP_REG_IMM (code, tmpreg, 0, 0);
+				buf [2] = code;
+				ARM_B_COND (code, ARMCOND_NE, 0);
+				arm_patch (buf [2], buf [1]);
+				arm_patch (buf [1], code);
+				break;
+			case OP_ATOMIC_ADD_NEW_I4:
+				buf [0] = code;
+				ARM_DMB (code, ARM_DMB_SY);
+				ARM_LDREX_REG (code, ARMREG_LR, ins->sreg1);
+				ARM_ADD_REG_REG (code, ARMREG_LR, ARMREG_LR, ins->sreg2);
+				ARM_STREX_REG (code, tmpreg, ARMREG_LR, ins->sreg1);
+				ARM_CMP_REG_IMM (code, tmpreg, 0, 0);
+				buf [1] = code;
+				ARM_B_COND (code, ARMCOND_NE, 0);
+				arm_patch (buf [1], buf [0]);
+				break;
+			default:
+				g_assert_not_reached ();
+			}
+
+			ARM_DMB (code, ARM_DMB_SY);
+			if (tmpreg != ins->dreg)
+				ARM_LDR_IMM (code, tmpreg, cfg->frame_reg, cfg->arch.atomic_tmp_offset);
+			ARM_MOV_REG_REG (code, ins->dreg, ARMREG_LR);
+			break;
+		}
+
 		/*case OP_BIGMUL:
 			ppc_mullw (code, ppc_r4, ins->sreg1, ins->sreg2);
 			ppc_mulhw (code, ppc_r3, ins->sreg1, ins->sreg2);
@@ -4228,6 +4374,8 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 		case OP_NOP:
 		case OP_DUMMY_USE:
 		case OP_DUMMY_STORE:
+		case OP_DUMMY_ICONST:
+		case OP_DUMMY_R8CONST:
 		case OP_NOT_REACHED:
 		case OP_NOT_NULL:
 			break;
@@ -4638,6 +4786,66 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 				code = mono_arm_patchable_b (code, ARMCOND_AL);
 			}
 			break;
+		case OP_TAILCALL: {
+			MonoCallInst *call = (MonoCallInst*)ins;
+
+			/*
+			 * The stack looks like the following:
+			 * <caller argument area>
+			 * <saved regs etc>
+			 * <rest of frame>
+			 * <callee argument area>
+			 * Need to copy the arguments from the callee argument area to
+			 * the caller argument area, and pop the frame.
+			 */
+			if (call->stack_usage) {
+				int i, prev_sp_offset = 0;
+
+				/* Compute size of saved registers restored below */
+				if (iphone_abi)
+					prev_sp_offset = 2 * 4;
+				else
+					prev_sp_offset = 1 * 4;
+				for (i = 0; i < 16; ++i) {
+					if (cfg->used_int_regs & (1 << i))
+						prev_sp_offset += 4;
+				}
+
+				code = emit_big_add (code, ARMREG_IP, cfg->frame_reg, cfg->stack_usage + prev_sp_offset);
+
+				/* Copy arguments on the stack to our argument area */
+				for (i = 0; i < call->stack_usage; i += sizeof (mgreg_t)) {
+					ARM_LDR_IMM (code, ARMREG_LR, ARMREG_SP, i);
+					ARM_STR_IMM (code, ARMREG_LR, ARMREG_IP, i);
+				}
+			}
+
+			/*
+			 * Keep in sync with mono_arch_emit_epilog
+			 */
+			g_assert (!cfg->method->save_lmf);
+
+			code = emit_big_add (code, ARMREG_SP, cfg->frame_reg, cfg->stack_usage);
+			if (iphone_abi) {
+				if (cfg->used_int_regs)
+					ARM_POP (code, cfg->used_int_regs);
+				ARM_POP (code, (1 << ARMREG_R7) | (1 << ARMREG_LR));
+			} else {
+				ARM_POP (code, cfg->used_int_regs | (1 << ARMREG_LR));
+			}
+
+			mono_add_patch_info (cfg, (guint8*) code - cfg->native_code, MONO_PATCH_INFO_METHOD_JUMP, call->method);
+			if (cfg->compile_aot) {
+				ARM_LDR_IMM (code, ARMREG_IP, ARMREG_PC, 0);
+				ARM_B (code, 0);
+				*(gpointer*)code = NULL;
+				code += 4;
+				ARM_LDR_REG_REG (code, ARMREG_PC, ARMREG_PC, ARMREG_IP);
+			} else {
+				code = mono_arm_patchable_b (code, ARMCOND_AL);
+			}
+			break;
+		}
 		case OP_CHECK_THIS:
 			/* ensure ins->sreg1 is not NULL */
 			ARM_LDRB_IMM (code, ARMREG_LR, ins->sreg1, 0);
@@ -6134,8 +6342,6 @@ mono_arch_emit_exceptions (MonoCompile *cfg)
 void
 mono_arch_finish_init (void)
 {
-	lmf_tls_offset = mono_get_lmf_tls_offset ();
-	lmf_addr_tls_offset = mono_get_lmf_addr_tls_offset ();
 }
 
 void
@@ -6958,6 +7164,19 @@ mono_arch_set_target (char *mtriple)
 	}
 	if (strstr (mtriple, "gnueabi"))
 		eabi_supported = TRUE;
+}
+
+gboolean
+mono_arch_opcode_supported (int opcode)
+{
+	switch (opcode) {
+	case OP_ATOMIC_EXCHANGE_I4:
+	case OP_ATOMIC_CAS_I4:
+	case OP_ATOMIC_ADD_NEW_I4:
+		return v7_supported;
+	default:
+		return FALSE;
+	}
 }
 
 #if defined(ENABLE_GSHAREDVT)

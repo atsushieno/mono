@@ -30,7 +30,7 @@ namespace Mono.CSharp {
 		V_5 = 5,
 		Future = 100,
 
-		Default = LanguageVersion.V_5,
+		Default = LanguageVersion.Future,
 	}
 
 	public enum RuntimeVersion
@@ -159,6 +159,8 @@ namespace Mono.CSharp {
 		public bool StdLib;
 
 		public RuntimeVersion StdLibRuntimeVersion;
+
+		public string RuntimeMetadataVersion;
 
 		public bool WriteMetadataOnly;
 
@@ -1180,6 +1182,15 @@ namespace Mono.CSharp {
 					}
 					return ParseResult.Error;
 				}
+				return ParseResult.Success;
+
+			case "runtimemetadataversion":
+				if (value.Length == 0) {
+					Error_RequiresArgument (option);
+					return ParseResult.Error;
+				}
+
+				settings.RuntimeMetadataVersion = value;
 				return ParseResult.Success;
 
 			default:

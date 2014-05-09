@@ -44,6 +44,8 @@ namespace Mono.Debugger.Soft
 		public int[] il_offsets;
 		public int[] line_numbers;
 		public int[] column_numbers;
+		public int[] end_line_numbers;
+		public int[] end_column_numbers;
 		public SourceInfo[] source_files;
 	}
 
@@ -213,6 +215,12 @@ namespace Mono.Debugger.Soft
 		public string Name, ScopeName, FQName, Guid;
 		public long Assembly;
 	}		
+
+	class FieldMirrorInfo {
+		public string Name;
+		public long Parent, TypeId;
+		public int Attrs;
+	}
 
 	enum TokenType {
 		STRING = 0,
@@ -405,7 +413,7 @@ namespace Mono.Debugger.Soft
 		 * with newer runtimes, and vice versa.
 		 */
 		internal const int MAJOR_VERSION = 2;
-		internal const int MINOR_VERSION = 27;
+		internal const int MINOR_VERSION = 32;
 
 		enum WPSuspendPolicy {
 			NONE = 0,
@@ -426,6 +434,7 @@ namespace Mono.Debugger.Soft
 			METHOD = 22,
 			TYPE = 23,
 			MODULE = 24,
+			FIELD = 25,
 			EVENT = 64
 		}
 
@@ -488,7 +497,8 @@ namespace Mono.Debugger.Soft
 			/* FIXME: Merge into GET_INFO when the major protocol version is increased */
 			GET_ID = 5,
 			/* Ditto */
-			GET_TID = 6
+			GET_TID = 6,
+			SET_IP = 7
 		}
 
 		enum CmdEventRequest {
@@ -553,7 +563,12 @@ namespace Mono.Debugger.Soft
 			CMD_TYPE_GET_METHODS_BY_NAME_FLAGS = 15,
 			GET_INTERFACES = 16,
 			GET_INTERFACE_MAP = 17,
-			IS_INITIALIZED = 18
+			IS_INITIALIZED = 18,
+			CREATE_INSTANCE = 19
+		}
+
+		enum CmdField {
+			GET_INFO = 1
 		}
 
 		[Flags]
@@ -1357,6 +1372,9 @@ namespace Mono.Debugger.Soft
 			case CommandSet.MODULE:
 				cmd = ((CmdModule)command).ToString ();
 				break;
+			case CommandSet.FIELD:
+				cmd = ((CmdField)command).ToString ();
+				break;
 			case CommandSet.EVENT:
 				cmd = ((CmdEvent)command).ToString ();
 				break;
@@ -1739,6 +1757,8 @@ namespace Mono.Debugger.Soft
 			info.line_numbers = new int [n_il_offsets];
 			info.source_files = new SourceInfo [n_il_offsets];
 			info.column_numbers = new int [n_il_offsets];
+			info.end_line_numbers = new int [n_il_offsets];
+			info.end_column_numbers = new int [n_il_offsets];
 			for (int i = 0; i < n_il_offsets; ++i) {
 				info.il_offsets [i] = res.ReadInt ();
 				info.line_numbers [i] = res.ReadInt ();
@@ -1752,6 +1772,13 @@ namespace Mono.Debugger.Soft
 					info.column_numbers [i] = res.ReadInt ();
 				else
 					info.column_numbers [i] = 0;
+				if (Version.AtLeast (2, 32)) {
+					info.end_line_numbers [i] = res.ReadInt ();
+					info.end_column_numbers [i] = res.ReadInt ();
+				} else {
+					info.end_column_numbers [i] = -1;
+					info.end_column_numbers [i] = -1;
+				}
 			}
 
 			return info;
@@ -1924,6 +1951,10 @@ namespace Mono.Debugger.Soft
 
 		internal long Thread_GetTID (long id) {
 			return SendReceive (CommandSet.THREAD, (int)CmdThread.GET_TID, new PacketWriter ().WriteId (id)).ReadLong ();
+		}
+
+		internal void Thread_SetIP (long id, long method_id, long il_offset) {
+			SendReceive (CommandSet.THREAD, (int)CmdThread.SET_IP, new PacketWriter ().WriteId (id).WriteId (method_id).WriteLong (il_offset));
 		}
 
 		/*
@@ -2133,6 +2164,21 @@ namespace Mono.Debugger.Soft
 		internal bool Type_IsInitialized (long id) {
 			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.IS_INITIALIZED, new PacketWriter ().WriteId (id));
 			return r.ReadInt () == 1;
+		}
+
+		internal long Type_CreateInstance (long id) {
+			PacketReader r = SendReceive (CommandSet.TYPE, (int)CmdType.CREATE_INSTANCE, new PacketWriter ().WriteId (id));
+			return r.ReadId ();
+		}
+
+		/*
+		 * FIELD
+		 */
+
+		internal FieldMirrorInfo Field_GetInfo (long id) {
+			PacketReader r = SendReceive (CommandSet.FIELD, (int)CmdField.GET_INFO, new PacketWriter ().WriteId (id));
+			FieldMirrorInfo info = new FieldMirrorInfo { Name = r.ReadString (), Parent = r.ReadId (), TypeId = r.ReadId (), Attrs = r.ReadInt () };
+			return info;
 		}
 
 		/*

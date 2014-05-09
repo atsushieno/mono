@@ -292,12 +292,6 @@ mono_arch_nullify_class_init_trampoline (guint8 *code, mgreg_t *regs)
 		}
 }
 
-void
-mono_arch_nullify_plt_entry (guint8 *code, mgreg_t *regs)
-{
-	mono_arch_patch_plt_entry (code, NULL, regs, mini_get_nullified_class_init_trampoline ());
-}
-
 guchar*
 mono_arch_create_generic_trampoline (MonoTrampolineType tramp_type, MonoTrampInfo **info, gboolean aot)
 {
@@ -1156,7 +1150,7 @@ guint8*
 mono_arch_get_call_target (guint8 *code)
 {
 	if (code [-5] == 0xe8) {
-		guint32 disp = *(guint32*)(code - 4);
+		gint32 disp = *(gint32*)(code - 4);
 		guint8 *target = code + disp;
 
 		return target;

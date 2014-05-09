@@ -325,7 +325,7 @@ namespace Mono.CSharp
 			}
 
 			if (bc.HasSet (ResolveContext.Options.CatchScope)) {
-				bc.Report.Error (1985, loc, "The `await' operator cannot be used in the body of a catch clause");
+				bc.Report.Error (1985, loc, "The `await' operator cannot be used in a catch clause");
 			}
 
 			if (!base.Resolve (bc))
@@ -959,15 +959,19 @@ namespace Mono.CSharp
 
 		public override void Emit (EmitContext ec)
 		{
-			EmitWithCleanup (ec, true);
-		}
-
-		public void EmitWithCleanup (EmitContext ec, bool release)
-		{
 			base.Emit (ec);
 
-			if (release)
-				IsAvailableForReuse = true;
+			PrepareCleanup (ec);
+		}
+
+		public void EmitLoad (EmitContext ec)
+		{
+			base.Emit (ec);
+		}
+
+		public void PrepareCleanup (EmitContext ec)
+		{
+			IsAvailableForReuse = true;
 
 			//
 			// Release any captured reference type stack variables

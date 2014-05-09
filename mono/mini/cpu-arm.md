@@ -94,6 +94,7 @@ lcall_membase: dest:l src1:b len:16 clob:c
 vcall: len:20 clob:c
 vcall_reg: src1:i len:8 clob:c
 vcall_membase: src1:b len:16 clob:c
+tailcall: len:160 clob:c
 iconst: dest:i len:16
 r4const: dest:f len:24
 r8const: dest:f len:20
@@ -261,6 +262,8 @@ arm_rsc_imm: dest:i src1:i len:4
 # Linear IR opcodes
 dummy_use: src1:i len:0
 dummy_store: len:0
+dummy_iconst: dest:i len:0
+dummy_r8const: dest:f len:0
 not_reached: len:0
 not_null: src1:i len:0
 
@@ -334,3 +337,7 @@ gc_liveness_def: len:0
 gc_liveness_use: len:0
 gc_spill_slot_liveness_def: len:0
 gc_param_slot_liveness_def: len:0
+
+atomic_exchange_i4: dest:i src1:i src2:i len:64
+atomic_cas_i4: dest:i src1:i src2:i src3:i len:64
+atomic_add_new_i4: dest:i src1:i src2:i len:64
