@@ -957,13 +957,13 @@ mono_thread_attach_full (MonoDomain *domain, gboolean force_attach)
 }
 
 void
-mono_thread_detach (MonoThread *thread)
+mono_thread_detach_internal (MonoInternalThread *thread)
 {
 	g_return_if_fail (thread != NULL);
 
-	THREAD_DEBUG (g_message ("%s: mono_thread_detach for %p (%"G_GSIZE_FORMAT")", __func__, thread, (gsize)thread->internal_thread->tid));
+	THREAD_DEBUG (g_message ("%s: mono_thread_detach for %p (%"G_GSIZE_FORMAT")", __func__, thread, (gsize)thread->tid));
 
-	thread_cleanup (thread->internal_thread);
+	thread_cleanup (thread);
 
 	SET_CURRENT_OBJECT (NULL);
 	mono_domain_unset ();
@@ -972,6 +972,13 @@ mono_thread_detach (MonoThread *thread)
 	 * reference in mono_thread_attach (), because the GC will do it
 	 * when the Thread object is finalised.
 	 */
+}
+
+void
+mono_thread_detach (MonoThread *thread)
+{
+	if (thread)
+		mono_thread_detach_internal (thread->internal_thread);
 }
 
 void
@@ -1972,6 +1979,10 @@ static void CALLBACK interruption_request_apc (ULONG_PTR param)
  */
 static void signal_thread_state_change (MonoInternalThread *thread)
 {
+#ifndef HOST_WIN32
+	gpointer wait_handle;
+#endif
+
 	if (thread == mono_thread_internal_current ()) {
 		/* Do it synchronously */
 		MonoException *exc = mono_thread_request_interruption (FALSE); 
@@ -1982,9 +1993,6 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 #ifdef HOST_WIN32
 	QueueUserAPC ((PAPCFUNC)interruption_request_apc, thread->handle, NULL);
 #else
-	/* fixme: store the state somewhere */
-	mono_thread_kill (thread, mono_thread_get_abort_signal ());
-
 	/* 
 	 * This will cause waits to be broken.
 	 * It will also prevent the thread from entering a wait, so if the thread returns
@@ -1992,7 +2000,12 @@ static void signal_thread_state_change (MonoInternalThread *thread)
 	 * functions in the io-layer until the signal handler calls QueueUserAPC which will
 	 * make it return.
 	 */
-	wapi_interrupt_thread (thread->handle);
+	wait_handle = wapi_prepare_interrupt_thread (thread->handle);
+
+	/* fixme: store the state somewhere */
+	mono_thread_kill (thread, mono_thread_get_abort_signal ());
+
+	wapi_finish_interrupt_thread (wait_handle);
 #endif /* HOST_WIN32 */
 }
 
@@ -3180,7 +3193,7 @@ print_thread_dump (MonoInternalThread *thread, MonoThreadInfo *info)
 #endif
 
 	mono_get_eh_callbacks ()->mono_walk_stack_with_state (print_stack_frame_to_string, &info->suspend_state, MONO_UNWIND_SIGNAL_SAFE, text);
-	mono_thread_info_resume (mono_thread_info_get_tid (info));
+	mono_thread_info_finish_suspend_and_resume (info);
 
 	fprintf (stdout, "%s", text->str);
 
@@ -4155,6 +4168,8 @@ mono_thread_request_interruption (gboolean running_managed)
 		/* Our implementation of this function ignores the func argument */
 #ifdef HOST_WIN32
 		QueueUserAPC ((PAPCFUNC)dummy_apc, thread->handle, NULL);
+#else
+		wapi_self_interrupt ();
 #endif
 		return NULL;
 	}
@@ -4518,13 +4533,13 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 	}
 
 	if (mono_get_eh_callbacks ()->mono_install_handler_block_guard (&info->suspend_state)) {
-		mono_thread_info_resume (mono_thread_info_get_tid (info));
+		mono_thread_info_finish_suspend_and_resume (info);
 		return;
 	}
 
 	/*someone is already interrupting it*/
 	if (InterlockedCompareExchange (&thread->interruption_requested, 1, 0) == 1) {
-		mono_thread_info_resume (mono_thread_info_get_tid (info));
+		mono_thread_info_finish_suspend_and_resume (info);
 		return;
 	}
 	InterlockedIncrement (&thread_interruption_requested);
@@ -4538,7 +4553,7 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 		/*Set the thread to call */
 		if (install_async_abort)
 			mono_thread_info_setup_async_call (info, self_interrupt_thread, NULL);
-		mono_thread_info_resume (mono_thread_info_get_tid (info));
+		mono_thread_info_finish_suspend_and_resume (info);
 	} else {
 		gpointer interrupt_handle;
 		/* 
@@ -4551,7 +4566,7 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 #ifndef HOST_WIN32
 		interrupt_handle = wapi_prepare_interrupt_thread (thread->handle);
 #endif
-		mono_thread_info_resume (mono_thread_info_get_tid (info));
+		mono_thread_info_finish_suspend_and_resume (info);
 #ifndef HOST_WIN32
 		wapi_finish_interrupt_thread (interrupt_handle);
 #endif
@@ -4560,16 +4575,18 @@ abort_thread_internal (MonoInternalThread *thread, gboolean can_raise_exception,
 }
 
 static void
-transition_to_suspended (MonoInternalThread *thread)
+transition_to_suspended (MonoInternalThread *thread, MonoThreadInfo *info)
 {
 	if ((thread->state & ThreadState_SuspendRequested) == 0) {
 		g_assert (0); /*FIXME we should not reach this */
 		/*Make sure we balance the suspend count.*/
-		mono_thread_info_resume ((MonoNativeThreadId)(gpointer)(gsize)thread->tid);
+		if (info)
+			mono_thread_info_finish_suspend_and_resume (info);
 	} else {
 		thread->state &= ~ThreadState_SuspendRequested;
 		thread->state |= ThreadState_Suspended;
-		mono_thread_info_finish_suspend ();
+		if (info)
+			mono_thread_info_finish_suspend (info);
 	}
 	UNLOCK_THREAD (thread);
 }
@@ -4584,7 +4601,7 @@ suspend_thread_internal (MonoInternalThread *thread, gboolean interrupt)
 
 	LOCK_THREAD (thread);
 	if (thread == mono_thread_internal_current ()) {
-		transition_to_suspended (thread);
+		transition_to_suspended (thread, NULL);
 		mono_thread_info_self_suspend ();
 	} else {
 		MonoThreadInfo *info;
@@ -4603,7 +4620,7 @@ suspend_thread_internal (MonoInternalThread *thread, gboolean interrupt)
 		running_managed = mono_jit_info_match (ji, MONO_CONTEXT_GET_IP (&info->suspend_state.ctx));
 
 		if (running_managed && !protected_wrapper) {
-			transition_to_suspended (thread);
+			transition_to_suspended (thread, info);
 		} else {
 			gpointer interrupt_handle;
 
@@ -4613,7 +4630,7 @@ suspend_thread_internal (MonoInternalThread *thread, gboolean interrupt)
 			if (interrupt)
 				interrupt_handle = wapi_prepare_interrupt_thread (thread->handle);
 #endif
-			mono_thread_info_resume (mono_thread_info_get_tid (info));
+			mono_thread_info_finish_suspend_and_resume (info);
 #ifndef HOST_WIN32
 			if (interrupt)
 				wapi_finish_interrupt_thread (interrupt_handle);
@@ -4663,7 +4680,7 @@ self_suspend_internal (MonoInternalThread *thread)
 		return;
 	}
 
-	transition_to_suspended (thread);
+	transition_to_suspended (thread, NULL);
 	mono_thread_info_self_suspend ();
 }
 
