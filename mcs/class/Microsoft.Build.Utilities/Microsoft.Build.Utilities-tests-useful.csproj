@@ -43,6 +43,7 @@
     <Compile Include="Test\Microsoft.Build.Utilities\LoggerTest.cs" />
     <Compile Include="Test\Microsoft.Build.Utilities\TaskItemTest.cs" />
     <Compile Include="Test\Microsoft.Build.Utilities\TaskLoggingHelperTest.cs" />
+    <Compile Include="Test\Microsoft.Build.Utilities\ToolLocationHelperTest.cs" />
   </ItemGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
@@ -69,6 +70,7 @@
       <Project>{0DA63190-E6E1-41C5-B683-A54FADBE61CB}</Project>
       <Name>Microsoft.Build.Engine-useful</Name>
     </ProjectReference>
+    <Reference Include="nunit.framework, Version=2.6.0.12051, Culture=neutral, PublicKeyToken=96d09a1eb7f44a77" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Properties\" />
