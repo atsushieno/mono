@@ -1,0 +1,48 @@
+About this document
+-------------------
+
+This document describes how we import Microsoft referencesource into
+our System.Data.
+
+
+Basic Stragegy
+--------------
+
+Basically, the only possibility I find is to replace everything we have
+written with MS sources. I tried to split out driver-specific features
+from System.Data sources, but the work, IF possible, is too complicated.
+
+(Namely, driver base classes in System.Data.Common, which became
+System.Data.ProviderBase in referencesource, are not compatible.)
+
+This means, we abandon two significant features:
+
+	- libgda-based System.Data.OleDb
+	- Mono.Data.Tds-based System.Data.SqlClient
+
+  (unixodbc-based System.Data.Odbc would still work, because the libodbc
+  API should be compatible with odbc32.dll on Windows.)
+
+  Should we preserve those "working" features? Probably we can discard them:
+
+ 	- System.Data.OleDb has been already declared "not maintained"
+	   since 2006 and we recommend GDA# on our documentation.
+	- System.Data.SqlClient is based on Mono.Data.Tds. If anyone
+	  seriously wants to connect to SQL Server from non-Windows,
+	  they can directly use Mono.Data.Tds or System.Data.Odbc.
+	  Advanced features that are specific to System.Data.SqlClient
+	  would not work well on Mono-based implementation anyways.
+
+	  - Another option is to extract SqlClient implementation into
+	    another assembly and provide as independent NuGet package.
+	    We are not sure if it is a viable option. At least any work
+	    without practical need is not worthy.
+ 
+
+The actual import work
+----------------------
+
+- We need Res dummy strings (just like other assemblies).
+- NativeOleDbWrapper needs to be generated. I think it is tlbimp-based
+  generated code. We should try it with tlbimp on Windows.
+- ditto for SNINativeMethodWrapper.
