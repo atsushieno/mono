@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security;
 
 namespace System.Text
 {
@@ -103,6 +104,91 @@ internal static class EncodingHelper
 							enc = EncodingHelper.UTF8Unmarked;
 						}
 		return enc;
+	}
+
+	// Loaded copy of the "I18N" assembly.  We need to move
+	// this into a class in "System.Private" eventually.
+	private static Assembly i18nAssembly;
+	private static bool i18nDisabled;
+
+	// Invoke a specific method on the "I18N" manager object.
+	// Returns NULL if the method failed.
+	internal static Object InvokeI18N (String name, params Object[] args)
+	{
+		lock (lockobj) {
+			// Bail out if we previously detected that there
+			// is insufficent engine support for I18N handling.
+			if (i18nDisabled) {
+				return null;
+			}
+
+			// Find or load the "I18N" assembly.
+			if (i18nAssembly == null) {
+				try {
+					try {
+						i18nAssembly = Assembly.Load (Consts.AssemblyI18N);
+					} catch (NotImplementedException) {
+						// Assembly loading unsupported by the engine.
+						i18nDisabled = true;
+						return null;
+					}
+					if (i18nAssembly == null) {
+						return null;
+					}
+				} catch (SystemException) {
+					return null;
+				}
+			}
+
+			// Find the "I18N.Common.Manager" class.
+			Type managerClass;
+			try {
+				managerClass = i18nAssembly.GetType ("I18N.Common.Manager");
+			} catch (NotImplementedException) {
+				// "GetType" is not supported by the engine.
+				i18nDisabled = true;
+				return null;
+			}
+			if (managerClass == null) {
+				return null;
+			}
+
+			// Get the value of the "PrimaryManager" property.
+			Object manager;
+			try {
+				manager = managerClass.InvokeMember
+						("PrimaryManager",
+						 BindingFlags.GetProperty |
+						 	BindingFlags.Static |
+							BindingFlags.Public,
+						 null, null, null, null, null, null);
+				if (manager == null) {
+					return null;
+				}
+			} catch (MissingMethodException) {
+				return null;
+			} catch (SecurityException) {
+				return null;
+			} catch (NotImplementedException) {
+				// "InvokeMember" is not supported by the engine.
+				i18nDisabled = true;
+				return null;
+			}
+
+			// Invoke the requested method on the manager.
+			try {
+				return managerClass.InvokeMember
+						(name,
+						 BindingFlags.InvokeMethod |
+						 	BindingFlags.Instance |
+							BindingFlags.Public,
+						 null, manager, args, null, null, null);
+			} catch (MissingMethodException) {
+				return null;
+			} catch (SecurityException) {
+				return null;
+			}
+		}
 	}
 }
 
