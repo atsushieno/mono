@@ -5737,8 +5737,9 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			guint32 size = ins->opcode == OP_ATOMIC_EXCHANGE_I4 ? 4 : 8;
 
 			/* LOCK prefix is implied. */
-			amd64_xchg_membase_reg_size (code, ins->sreg1, ins->inst_offset, ins->sreg2, size);
-			amd64_mov_reg_reg (code, ins->dreg, ins->sreg2, size);
+			amd64_mov_reg_reg (code, GP_SCRATCH_REG, ins->sreg2, size);
+			amd64_xchg_membase_reg_size (code, ins->sreg1, ins->inst_offset, GP_SCRATCH_REG, size);
+			amd64_mov_reg_reg (code, ins->dreg, GP_SCRATCH_REG, size);
 			break;
 		}
 		case OP_ATOMIC_CAS_I4:
