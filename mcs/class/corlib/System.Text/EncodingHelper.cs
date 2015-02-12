@@ -69,6 +69,41 @@ internal static class EncodingHelper
 
 	[MethodImpl (MethodImplOptions.InternalCall)]
 	extern internal static string InternalCodePage (ref int code_page);
+
+	internal static Encoding GetDefaultEncoding ()
+	{
+		Encoding enc = null;
+						// See if the underlying system knows what
+						// code page handler we should be using.
+						int code_page = 1;
+						
+						string code_page_name = InternalCodePage (ref code_page);
+						try {
+							if (code_page == -1)
+								enc = Encoding.GetEncoding (code_page_name);
+							else {
+								// map the codepage from internal to our numbers
+								code_page = code_page & 0x0fffffff;
+								switch (code_page){
+								case 1: code_page = 20127; break; // ASCIIEncoding.ASCII_CODE_PAGE
+								case 2: code_page = 65007; break; // UTF7Encoding.UTF7_CODE_PAGE
+								case 3: code_page = 65001; break; // UTF8Encoding.UTF8_CODE_PAGE
+								case 4: code_page = 1200; break; // UnicodeEncoding.UNICODE_CODE_PAGE
+								case 5: code_page = 1201; break; // UnicodeEncoding.BIG_UNICODE_CODE_PAGE
+								case 6: code_page = 1252; break; // Latin1Encoding.ISOLATIN_CODE_PAGE
+								}
+								enc = Encoding.GetEncoding (code_page);
+							}
+						} catch (NotSupportedException) {
+							// code_page is not supported on underlying platform
+							enc = EncodingHelper.UTF8Unmarked;
+						} catch (ArgumentException) {
+							// code_page_name is not a valid code page, or is 
+							// not supported by underlying OS
+							enc = EncodingHelper.UTF8Unmarked;
+						}
+		return enc;
+	}
 }
 
 }
