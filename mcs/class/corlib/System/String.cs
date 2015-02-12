@@ -58,7 +58,7 @@ namespace System
 	[Serializable]
 	[ComVisible (true)]
 	[StructLayout (LayoutKind.Sequential)]
-	public sealed partial class String : IConvertible, ICloneable, IEnumerable, IComparable, IComparable<String>, IEquatable <String>, IEnumerable<char>
+	public sealed class String : IConvertible, ICloneable, IEnumerable, IComparable, IComparable<String>, IEquatable <String>, IEnumerable<char>
 	{
 		[NonSerialized] private int length;
 		[NonSerialized] private char start_char;
@@ -3224,8 +3224,7 @@ namespace System
 		[MethodImplAttribute (MethodImplOptions.InternalCall)]
 		private extern static int GetLOSLimit ();
 
-#region Workaround for mcs bug that does not allow partial class declaration on this exact class...
-	// and actually we replace some source parts.
+#region "from referencesource" // and actually we replaced some parts.
 
         // Helper for encodings so they can talk to our buffer directly
         // stringLength must be the exact size we'll expect
