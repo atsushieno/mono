@@ -6,6 +6,7 @@ Assembly/AssemblyInfo.cs
 Dummy.cs
 System.Xml.Res.cs
 System.Xml.Utils.Res.cs
+ReferenceSources/System.Xml.Assembly.cs
 ReferenceSources/ThisAssembly.cs
 ReferenceSources/TypeScope.cs
 ReferenceSources/Wsdl.cs
@@ -114,7 +115,6 @@ ReferenceSources/Wsdl.cs
 ../../../external/referencesource/System.Xml/misc/HResults.cs
 ../../../external/referencesource/System.Xml/misc/InvariantComparer.cs
 ../../../external/referencesource/System.Xml/misc/PrivilegedConfigurationManager.cs
-../../../external/referencesource/System.Xml/System/Xml/Assembly/System.Xml.Assembly.cs
 ../../../external/referencesource/System.Xml/System/Xml/AsyncHelper.cs
 ../../../external/referencesource/System.Xml/System/Xml/Base64Decoder.cs
 ../../../external/referencesource/System.Xml/System/Xml/Base64EncoderAsync.cs

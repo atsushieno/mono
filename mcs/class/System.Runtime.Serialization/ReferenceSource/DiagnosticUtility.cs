@@ -41,6 +41,11 @@ namespace System.Runtime.Serialization {
 				return new ArgumentException (arg);
 			}
 
+			internal static Exception ThrowHelperArgument (string paramName, string arg)
+			{
+				return new ArgumentException (paramName, arg);
+			}
+
 			internal static Exception ThrowHelperArgumentNull (string arg)
 			{
 				return new ArgumentNullException (arg);

@@ -1,5 +1,7 @@
 using System.Text;
 
+namespace System.Runtime.Serialization.Configuration {
+}
 namespace System.Runtime.Serialization {
 
 	internal class SR {
@@ -206,6 +208,7 @@ namespace System.Runtime.Serialization {
 		public const string InvalidGetSchemaMethod = "InvalidGetSchemaMethod";
 		public const string InvalidGlobalDataContractNamespace = "InvalidGlobalDataContractNamespace";
 		public const string InvalidInclusivePrefixListCollection = "InvalidInclusivePrefixListCollection";
+		public const string InvalidISerializableDerivation = "InvalidISerializableDerivation";
 		public const string InvalidKeyValueType = "InvalidKeyValueType";
 		public const string InvalidKeyValueTypeNamespace = "InvalidKeyValueTypeNamespace";
 		public const string InvalidLocalNameEmpty = "InvalidLocalNameEmpty";
