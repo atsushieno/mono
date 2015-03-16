@@ -1,8 +1,13 @@
 Assembly/AssemblyInfo.cs
 ../../build/common/Consts.cs.in
 ../../build/common/Locale.cs
+../../build/common/SR.cs
 Dummy.cs
 Res.cs
+
+ReferenceSources/Res.cs
+ReferenceSources/ThisAssembly.cs
+
 ../../../external/referencesource/System.Data/bid/inc/cs/bidPrivateBase.cs
 ../../../external/referencesource/System.Data/FxCopSuppressions/Baseline.cs
 ../../../external/referencesource/System.Data/FxCopSuppressions/EverettBreaking.cs

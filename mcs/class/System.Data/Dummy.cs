@@ -1,18 +1,3 @@
-static class AssemblyRef
-{
-	public const string SystemDesign = "System.Design";
-	public const string SystemDrawing = "System.Drawing";
-	public const string MicrosoftVSDesigner = "Mictosoft.VSDesigner";
-	public const string EcmaPublicKey = "b77a5c561934e089"; 
-	public const string EcmaPublicKeyFull = "00000000000000000400000000000000"; 
-}
-
-static class ThisAssembly
-{
-	public const string Version = "System.Xml";
-	public const string InformationalVersion = null;
-}
-
 namespace System.Data
 {
 	class SNINativeMethodWrapper

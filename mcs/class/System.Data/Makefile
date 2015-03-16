@@ -4,7 +4,7 @@ include ../../build/rules.make
 
 LIBRARY = System.Data.dll
 
-LIB_REFS = System System.Xml System.Core
+LIB_REFS = System System.Xml System.Core System.Numerics
 LIB_MCS_FLAGS = \
 	-nowarn:649 \
 	-d:DISABLE_IMPORT_NATIVES,BID_AUTOSIG	\
