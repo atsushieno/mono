@@ -1,5 +1,5 @@
-../../../external/referencesource/System.Data/System/Data/Common/ActivityCorrelator.cs
-../../../external/referencesource/System.Data/System/Data/Common/UnsafeNativeMethods.cs
+# ../../../external/referencesource/System.Data/System/Data/Common/ActivityCorrelator.cs
+# ../../../external/referencesource/System.Data/System/Data/Common/UnsafeNativeMethods.cs
 ../../../external/referencesource/System.Data/System/Data/Odbc/DbDataRecord.cs
 ../../../external/referencesource/System.Data/System/Data/Odbc/Odbc32.cs
 ../../../external/referencesource/System.Data/System/Data/Odbc/OdbcCommandBuilder.cs

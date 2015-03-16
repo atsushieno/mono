@@ -26,6 +26,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 using System.Data.Common;
+using System.Data.ProviderBase;
 using System.Security;
 using System.Security.Permissions;
 

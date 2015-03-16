@@ -54,6 +54,12 @@ namespace System.Data.SqlClient {
 	[TypeConverterAttribute ("System.Data.SqlClient.SqlParameter+SqlParameterConverter, " + Consts.AssemblySystem_Data)]
 	public sealed class SqlParameter : DbParameter, IDbDataParameter, IDataParameter, ICloneable
 	{
+		internal static Hashtable dbTypeMapping;
+		internal static Hashtable DbTypeMapping {
+			get { return dbTypeMapping;}
+			set { dbTypeMapping = value;}
+		}
+		
 		#region Fields
 
 		TdsMetaParameter metaParameter;
@@ -481,30 +487,6 @@ namespace System.Data.SqlClient {
 			if (t == null)
 				throw new ArgumentException (String.Format ("The parameter data type of {0} is invalid.", type.FullName));
 			SetSqlDbType ((SqlDbType) t);
-		}
-
-		// Returns System.Type corresponding to the underlying SqlDbType
-		internal override Type SystemType {
-			get {
-				return (Type) DbTypeMapping [sqlDbType];
-			}
-		}
-
-		internal override object FrameworkDbType {
-			get {
-				return sqlDbType;
-			}
-			
-			set {
-				object t;
-				try {
-					t = (DbType) DbTypeFromName ((string)value);
-					SetDbType ((DbType)t);
-				} catch (ArgumentException) {
-					t = (SqlDbType)FrameworkDbTypeFromName ((string)value);
-					SetSqlDbType ((SqlDbType) t);
-				}
-			}
 		}
 
 		DbType DbTypeFromName (string name)

@@ -39,16 +39,16 @@ EXTRA_DISTFILES = \
 
 #BUILT_SOURCES = Mono.Data.SqlExpressions/Parser.cs
 
-BUILT_SOURCES = \
-	gen_OdbcConnection.cs \
-	gen_OleDbConnection.cs \
-	gen_SqlConnection.cs \
-	gen_OdbcParameter.cs \
-	gen_OleDbParameter.cs \
-	gen_SqlParameter.cs \
-	gen_OdbcParameterCollection.cs \
-	gen_OleDbParameterCollection.cs \
-	gen_SqlParameterCollection.cs
+#BUILT_SOURCES = \
+#	gen_OdbcConnection.cs \
+#	gen_OleDbConnection.cs \
+#	gen_SqlConnection.cs \
+#	gen_OdbcParameter.cs \
+#	gen_OleDbParameter.cs \
+#	gen_SqlParameter.cs \
+#	gen_OdbcParameterCollection.cs \
+#	gen_OleDbParameterCollection.cs \
+#	gen_SqlParameterCollection.cs
 
 gen_OdbcConnection.cs: ../../../external/referencesource/System.Data/System/Data/ProviderBase/DbConnectionHelper.cs
 	sed -e "s/NAMESPACE/System.Data.Odbc/g" $< |\

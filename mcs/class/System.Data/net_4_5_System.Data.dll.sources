@@ -2,9 +2,13 @@ Assembly/AssemblyInfo.cs
 ../../build/common/Consts.cs.in
 ../../build/common/Locale.cs
 ../../build/common/SR.cs
+../../build/common/MonoTODOAttribute.cs
 Dummy.cs
 Res.cs
 
+# ReferenceSources/BidArgumentTypeAttribute.cs
+# ReferenceSources/BidMethodAttribute.cs
+ReferenceSources/InOutOfProcHelper.cs
 ReferenceSources/Res.cs
 ReferenceSources/ThisAssembly.cs
 
@@ -112,6 +116,7 @@ ReferenceSources/ThisAssembly.cs
 ../../../external/referencesource/System.Data/System/Data/Common/UInt16Storage.cs
 ../../../external/referencesource/System.Data/System/Data/Common/UInt32Storage.cs
 ../../../external/referencesource/System.Data/System/Data/Common/UInt64Storage.cs
+../../../external/referencesource/System.Data/System/Data/Common/UnsafeNativeMethods.cs
 ../../../external/referencesource/System.Data/System/Data/ConflictOptions.cs
 ../../../external/referencesource/System.Data/System/Data/ConnectionState.cs
 ../../../external/referencesource/System.Data/System/Data/ConstraintCollection.cs
@@ -201,8 +206,11 @@ ReferenceSources/ThisAssembly.cs
 ../../../external/referencesource/System.Data/System/Data/Merger.cs
 ../../../external/referencesource/System.Data/System/Data/MissingMappingAction.cs
 ../../../external/referencesource/System.Data/System/Data/MissingSchemaAction.cs
-#include odbc.sources
-#include oledb.sources
+../../../external/referencesource/System.Data/System/Data/Odbc/Odbc32.cs
+../../../external/referencesource/System.Data/System/Data/Odbc/OdbcConnectionString.cs
+../../../external/referencesource/System.Data/System/Data/Odbc/OdbcConnectionStringbuilder.cs
+../../../external/referencesource/System.Data/System/Data/Odbc/OdbcError.cs
+../../../external/referencesource/System.Data/System/Data/Odbc/OdbcPermission.cs
 ../../../external/referencesource/System.Data/System/Data/OperationAbortedException.cs
 ../../../external/referencesource/System.Data/System/Data/ParameterDirection.cs
 ../../../external/referencesource/System.Data/System/Data/PrimaryKeyTypeConverter.cs
@@ -244,7 +252,6 @@ ReferenceSources/ThisAssembly.cs
 ../../../external/referencesource/System.Data/System/Data/SimpleType.cs
 ../../../external/referencesource/System.Data/System/Data/SqlClient/ApplicationIntent.cs
 ../../../external/referencesource/System.Data/System/Data/SqlDbType.cs
-#include sqlclient.sources
 ../../../external/referencesource/System.Data/System/Data/SQLTypes/INullable.cs
 ../../../external/referencesource/System.Data/System/Data/SQLTypes/SQLBinary.cs
 ../../../external/referencesource/System.Data/System/Data/SQLTypes/SQLBoolean.cs
@@ -296,3 +303,16 @@ ReferenceSources/ThisAssembly.cs
 ../../../external/referencesource/System.Data/System/NewXml/XmlDataImplementation.cs
 ../../../external/referencesource/System.Data/System/NewXml/XPathNodePointer.cs
 # #include mono_db_specific.sources
+
+#include odbc.sources
+#include oledb.sources
+# #include sqlclient.sources
+
+# #include mono_odbc.sources
+# #include mono_oledb.sources
+#include mono_sqlclient.sources
+
+# #include microsoft_sqlserver_server.sources
+#include mono_microsoft_sqlserver_server.sources
+
+SqlServerDummy.cs

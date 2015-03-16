@@ -30,6 +30,7 @@
 
 using System.Data;
 using System.Data.Common;
+using System.Data.ProviderBase;
 
 namespace System.Data.SqlClient {
 	internal class SqlConnectionFactory : DbConnectionFactory
@@ -67,69 +68,26 @@ namespace System.Data.SqlClient {
 			}
 		}
 
-
-		[MonoTODO]
-                protected override IAsyncResult BeginCreateConnection (DbConnectionBase owningObject, DbConnectionString connectionOptions, DbConnectionInternal connection, AsyncCallback callback, object asyncStateObject)
-                {
-                        throw new NotImplementedException ();
-                }
-
-		[MonoTODO]
-                public new void ClearAllPools ()
-                {
-                        throw new NotImplementedException ();
-                }
-
-		[MonoTODO]
-                public new void ClearPool (DbConnectionBase connection)
-                {
-                        throw new NotImplementedException ();
-                }
-
                 [MonoTODO]
-		protected override DbConnectionInternal CreateConnection (DbConnectionString options, DbConnectionBase owningObject)
-                {
+        override protected DbConnectionInternal CreateConnection(DbConnectionOptions options, DbConnectionPoolKey poolKey, object poolGroupProviderInfo, DbConnectionPool pool, DbConnection owningConnection, DbConnectionOptions userOptions) {
                         throw new NotImplementedException ();
                 }
                 
                 [MonoTODO]
-		protected override DbConnectionString CreateConnectionOptions (string connectionString)
+		protected override DbConnectionOptions CreateConnectionOptions (string connectionString, DbConnectionOptions previous)
                 {
                         throw new NotImplementedException ();
                 }
 
                 [MonoTODO]
-		protected override DbConnectionPoolOptions CreateConnectionPoolOptions (DbConnectionString options)
+                override internal DbConnectionPoolProviderInfo CreateConnectionPoolProviderInfo(DbConnectionOptions connectionOptions)
                 {
                         throw new NotImplementedException ();
                 }
 
 
 		[MonoTODO]
-                protected override DbMetaDataFactory CreateMetaDataFactory (DbConnectionInternal internalConnection)
-                {
-                        throw new NotImplementedException ();
-                }
-
-		[MonoTODO]
-                protected override DbConnectionInternal EndCreateConnection (IAsyncResult asyncResult)
-                {
-                        throw new NotImplementedException ();
-                }
-
-		[MonoTODO]
-                protected internal new DbMetaDataFactory GetMetaDataFactory (DbConnectionString connectionOptions, DbConnectionInternal internalConnection)
-                {
-                        throw new NotImplementedException ();
-                }
-
-		internal new DbConnectionString CreateConnectionOptionsInternal (string connectionString)
-                {
-                        return CreateConnectionOptions (connectionString);
-                }
-
-		[MonoTODO]
-                public new void SetConnectionPoolOptions (string connectionString, DbConnectionPoolOptions poolOptions)
+                override protected DbMetaDataFactory CreateMetaDataFactory (DbConnectionInternal internalConnection, out bool cacheMetaDataFactory)
                 {
                         throw new NotImplementedException ();
                 }
