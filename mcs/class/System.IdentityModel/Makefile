@@ -7,12 +7,16 @@ OTHER_LIB_MCS_FLAGS = -r:System.Web.ApplicationServices.dll
 endif
 
 LIBRARY = System.IdentityModel.dll
-LIB_REFS = System System.Xml System.Security System.Web System.Configuration Mono.Security System.Runtime.Serialization
+LIB_REFS = System System.Core System.Xml System.Security System.Web System.Configuration Mono.Security System.ServiceModel.Internals SMDiagnostics System.Runtime.Serialization
 LIB_MCS_FLAGS = \
 		/d:NET_3_0	\
+		/nowarn:1634 \
+		/unsafe		\
 	        $(OTHER_LIB_MCS_FLAGS)
 
 TEST_MCS_FLAGS = $(LIB_MCS_FLAGS)
+
+RESOURCE_STRINGS = ../../../external/referencesource/System.ServiceModel/System.ServiceModel.txt
 
 EXTRA_DISTFILES = \
 	Test/Resources/test.cer \
