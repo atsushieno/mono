@@ -62,3 +62,6 @@ using System.Runtime.InteropServices;
 [assembly: AllowPartiallyTrustedCallers]
 
 [assembly: SecurityCritical (SecurityCriticalScope.Explicit)]
+
+// This does not exist in referencesource, but required.
+[assembly: InternalsVisibleTo ("System.ServiceModel, PublicKey=" + AssemblyRef.FrameworkPublicKeyFull2)]
