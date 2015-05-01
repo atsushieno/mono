@@ -1,13 +1,18 @@
 using System.Diagnostics;
+using System.Runtime;
 
-namespace System.Runtime.Serialization {
+namespace System.ServiceModel {
 
 	internal static class DiagnosticUtility {
 		internal static bool ShouldTrace;
-		internal static bool ShouldTraceError = true;
+		internal static bool ShouldTraceError;
 		internal static bool ShouldTraceWarning;
 		internal static bool ShouldTraceInformation;
-		internal static bool ShouldTraceVerbose = true;
+		internal static bool ShouldTraceVerbose;
+		
+		internal static bool ShouldUseActivity;
+		internal static int Level;
+		internal static EventLog EventLog;
 
 		internal static class DiagnosticTrace {
 			internal static void TraceEvent (params object [] args)
@@ -57,6 +62,11 @@ namespace System.Runtime.Serialization {
 				return new FatalException (msg, e);
 			}
 
+			internal static Exception ThrowHelperCritical (Exception e)
+			{
+				return e;
+			}
+
 			internal static Exception ThrowHelperWarning (Exception e)
 			{
 				return e;
@@ -74,8 +84,21 @@ namespace System.Runtime.Serialization {
 			}
 		}
 		
+		public static void DebugAssert (bool value, string message)
+		{
+#if DEBUG
+			if (!value)
+				throw new SystemException (message);
+#endif
+		}
+		
 		public static void TraceHandledException (Exception exception, TraceEventType type)
 		{
+		}
+		
+		public static void FailFast (string message)
+		{
+			throw new Exception (message);
 		}
 	}
 }

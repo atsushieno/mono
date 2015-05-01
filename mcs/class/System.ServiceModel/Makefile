@@ -8,15 +8,15 @@ RESOURCE_FILES = \
 
 LIBRARY = System.ServiceModel.dll
 
-LIB_REFS = System System.Xml System.Core System.Runtime.Serialization
+LIB_REFS = System System.Xml System.Core System.Xml.Linq System.Net.Http System.ServiceModel.Internals SMDiagnostics System.Runtime.Serialization System.Runtime.DurableInstancing System.Xaml
 LIB_MCS_FLAGS = \
-		/nowarn:414,169,67,3005,436,219,618 \
+		/nowarn:414,169,67,3005,436,219,618,1634 \
 		/unsafe \
 		/d:TRACE \
 		$(RESOURCE_FILES:%=/resource:%)
 
 ifneq (2.1, $(FRAMEWORK_VERSION))
-LIB_REFS += System.Configuration System.Data System.Security System.IdentityModel System.IdentityModel.Selectors System.Transactions System.Messaging System.Web System.Web.Services Mono.Security
+LIB_REFS += System.Configuration System.Data System.Security System.IdentityModel System.IdentityModel.Selectors System.Transactions System.Messaging System.Web System.Web.Services Mono.Security System.EnterpriseServices System.ServiceProcess System.DirectoryServices
 LIB_MCS_FLAGS += /d:NET_3_0
 endif
 
